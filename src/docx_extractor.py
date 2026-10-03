@@ -27,9 +27,7 @@ class DOCXExtractor:
 
                 for cell in row.cells:
                     text = cell.text.strip()
-
-                    if not row_data or text != row_data[-1]:
-                        row_data.append(text)
+                    row_data.append(text)
 
                 table_data.append(row_data)
 
