@@ -236,3 +236,94 @@ print("\n========== REPLACEMENT BEHAVIOR GOALS ==========")
 
 for goal in behavior_goals["replacement_behavior_goals"]:
     print("\n", goal)
+
+
+skill_acquisition_goals = (
+    fba_extractor.extract_skill_acquisition_goals()
+)
+
+print("\n========== SKILL ACQUISITION GOALS ==========")
+
+for area in skill_acquisition_goals:
+    print(
+        f"\nIntervention Area: "
+        f"{area['intervention_area']}"
+    )
+
+    for goal in area["goals"]:
+        print("\n", goal)
+
+
+parent_caregiver_goals = (
+    fba_extractor.extract_parent_caregiver_goals()
+)
+
+print("\n========== PARENT CAREGIVER GOALS ==========")
+
+print("\nParticipants:")
+for participant in parent_caregiver_goals["participants"]:
+    print(participant)
+
+print("\nGoals:")
+for goal in parent_caregiver_goals["goals"]:
+    print(goal)
+
+
+generalization_plan = (
+    fba_extractor.extract_generalization_maintenance_plan()
+)
+
+print(
+    "\n========== GENERALIZATION MAINTENANCE PLAN =========="
+)
+
+for key, value in generalization_plan.items():
+    print(f"\n{key}:")
+    print(value)
+
+
+transition_plan = (
+    fba_extractor.extract_transition_plan()
+)
+
+print("\n========== TRANSITION PLAN ==========")
+
+for key, value in transition_plan.items():
+    print(f"\n{key}:")
+    print(value)
+
+crisis_plan = (
+    fba_extractor.extract_crisis_plan()
+)
+
+print("\n========== CRISIS PLAN ==========")
+
+for key, value in crisis_plan.items():
+    print(f"\n{key}:")
+    print(value)
+
+summary_recommendations = (
+    fba_extractor.extract_summary_recommendations()
+)
+
+print("\n========== SUMMARY AND RECOMMENDATIONS ==========")
+
+print("\nClinical Summary:")
+print(summary_recommendations["clinical_summary"])
+
+print("\nService Requests:")
+
+for service in summary_recommendations["service_requests"]:
+    print("\n", service)
+
+
+parent_guardian_involvement = (
+    fba_extractor.extract_parent_guardian_involvement()
+)
+
+print(
+    "\n========== PARENT GUARDIAN INVOLVEMENT =========="
+)
+
+for key, value in parent_guardian_involvement.items():
+    print(f"{key}: {value}")

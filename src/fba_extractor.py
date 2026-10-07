@@ -1653,4 +1653,655 @@ class FBAExtractor:
             "replacement_behavior_goals": replacement_goals,
         }
 
-        
+    def extract_skill_acquisition_goals(self):
+        intervention_areas = []
+        current_area = None
+        current_goal = None
+
+        for table in self.tables:
+            for row in table:
+                if not row:
+                    continue
+
+                first_value = next(
+                    (
+                        cell.strip()
+                        for cell in row
+                        if cell.strip()
+                    ),
+                    "",
+                )
+
+                if not first_value:
+                    continue
+
+                normalized_value = self.normalize_label(first_value)
+
+                # -------------------------
+                # INTERVENTION AREA
+                # -------------------------
+                if normalized_value.startswith("intervention area"):
+                    if ":" in first_value:
+                        area_name = first_value.split(":", 1)[1].strip()
+                    else:
+                        area_name = first_value
+
+                    current_area = {
+                        "intervention_area": area_name,
+                        "goals": [],
+                    }
+
+                    intervention_areas.append(current_area)
+                    current_goal = None
+                    continue
+
+                # If we have not found an intervention area yet,
+                # there is nothing to extract.
+                if current_area is None:
+                    continue
+
+                # -------------------------
+                # DATE OF INTRODUCTION
+                # -------------------------
+                if normalized_value.startswith("date of introduction"):
+                    if current_goal is not None:
+                        current_goal["date_of_introduction"] = first_value
+
+                    continue
+
+                # -------------------------
+                # LOCATION / SETTING
+                # -------------------------
+                if normalized_value.startswith(
+                    "location/setting of skill acquisition goal"
+                ):
+                    if current_goal is not None:
+                        if ":" in first_value:
+                            location = first_value.split(":", 1)[1].strip()
+                        else:
+                            location = first_value
+
+                        current_goal["location_setting"] = location
+
+                    continue
+
+                # -------------------------
+                # BASELINE
+                # -------------------------
+                if (
+                    normalized_value.startswith("baseline data with dates")
+                    or normalized_value.startswith("baseline data and date")
+                ):
+                    if current_goal is not None:
+                        current_goal["baseline_data_date"] = first_value
+
+                    continue
+
+                # -------------------------
+                # SKILL ACQUISITION GOAL
+                # -------------------------
+                # Valid examples:
+                # "Skill Acquisition Goal 1:"
+                # "1. Skill Acquisition Goal 1:"
+                #
+                # Require the phrase to appear near the beginning
+                # instead of anywhere in a narrative.
+                cleaned_goal_label = normalized_value
+
+                # Remove optional numbering such as "1."
+                if cleaned_goal_label[:1].isdigit():
+                    parts = cleaned_goal_label.split(".", 1)
+
+                    if len(parts) == 2:
+                        cleaned_goal_label = parts[1].strip()
+
+                if cleaned_goal_label.startswith("skill acquisition goal"):
+                    current_goal = {
+                        "goal": first_value,
+                        "date_of_introduction": "",
+                        "location_setting": "",
+                        "baseline_data_date": "",
+                    }
+
+                    current_area["goals"].append(current_goal)
+                    continue
+
+        return intervention_areas
+
+    def extract_parent_caregiver_goals(self):
+        participants = []
+        goals = []
+
+        in_parent_goal_section = False
+        current_goal = None
+
+        for table in self.tables:
+            for row in table:
+                if not row:
+                    continue
+
+                non_empty_values = [
+                    cell.strip()
+                    for cell in row
+                    if cell.strip()
+                ]
+
+                if not non_empty_values:
+                    continue
+
+                first_value = non_empty_values[0]
+                normalized_value = self.normalize_label(first_value)
+
+                # -------------------------
+                # SECTION HEADING
+                # -------------------------
+                if normalized_value == "parent/caregiver goals":
+                    in_parent_goal_section = True
+                    current_goal = None
+                    continue
+
+                if not in_parent_goal_section:
+                    continue
+
+                # -------------------------
+                # PARTICIPANTS
+                # -------------------------
+                if normalized_value.startswith(
+                    "participants in parent training"
+                ):
+                    continue
+
+                # Participant rows occur before the first goal.
+                if current_goal is None and not goals:
+                    if (
+                        "parent/caregiver goals should specify"
+                        in normalized_value
+                    ):
+                        continue
+
+                    # Don't treat table headings/metadata as participants.
+                    if not normalized_value.startswith(
+                        "parent/caregiver goal"
+                    ):
+                        participant = {
+                            "participant": first_value,
+                            "previously_mastered_skills": (
+                                row[1].strip()
+                                if len(row) > 1
+                                else ""
+                            ),
+                        }
+
+                        participants.append(participant)
+                        continue
+
+                # -------------------------
+                # DATE INITIATED
+                # -------------------------
+                if normalized_value.startswith("date initiated"):
+                    if current_goal is not None:
+                        current_goal["date_initiated"] = first_value
+
+                    continue
+
+                # -------------------------
+                # LOCATION / SETTING
+                # -------------------------
+                # These rows begin with Parent/Caregiver goal
+                # but contain only the setting choices.
+                if (
+                    normalized_value.startswith("parent/caregiver goal")
+                    and (
+                        "telehealth" in normalized_value
+                        or "home" in normalized_value
+                        or "school" in normalized_value
+                        or "clinic" in normalized_value
+                        or "community" in normalized_value
+                    )
+                    and "long-term" not in normalized_value
+                ):
+                    if current_goal is not None:
+                        if ":" in first_value:
+                            location = first_value.split(":", 1)[1].strip()
+                        else:
+                            location = first_value
+
+                        current_goal["location_setting"] = location
+
+                    continue
+
+                # -------------------------
+                # BASELINE
+                # -------------------------
+                if (
+                    normalized_value.startswith("baseline data and date")
+                    or normalized_value.startswith("baseline data with dates")
+                ):
+                    if current_goal is not None:
+                        current_goal["baseline_data_date"] = first_value
+
+                    continue
+
+                # -------------------------
+                # PARENT / CAREGIVER GOAL
+                # -------------------------
+                if (
+                    normalized_value.startswith("parent/caregiver goal")
+                    and "long-term" in normalized_value
+                ):
+                    current_goal = {
+                        "goal": first_value,
+                        "date_initiated": "",
+                        "location_setting": "",
+                        "baseline_data_date": "",
+                    }
+
+                    goals.append(current_goal)
+                    continue
+
+        return {
+            "participants": participants,
+            "goals": goals,
+        }
+
+    def extract_generalization_maintenance_plan(self):
+        table = self.find_table([
+            "PLAN FOR GENERALIZATION",
+            "PLAN FOR GENERALIZATION (INCLUDING TRANSITION TO NATURAL MEDIATORS) AND MAINTENANCE",
+        ])
+
+        if table is None:
+            return {}
+
+        field_labels = {
+            "data collection": "data_collection",
+            "procedural reliability": "procedural_reliability",
+            "thinning the schedule of reinforcement": "thinning_reinforcement",
+            "family/caregiver training and monitoring": "family_caregiver_training",
+            "transition to natural mediators": "transition_to_natural_mediators",
+            "relapse prevention": "relapse_prevention",
+            "generalization and maintenance plan": "generalization_maintenance",
+        }
+
+        result = {
+            field_name: ""
+            for field_name in field_labels.values()
+        }
+
+        for row in table:
+            for cell in row:
+                value = cell.strip()
+
+                if not value:
+                    continue
+
+                normalized_value = self.normalize_label(value)
+
+                for label, field_name in field_labels.items():
+
+                    if normalized_value.startswith(label):
+                        # Each field has the format:
+                        #
+                        # Label (include plan to address): Value
+                        #
+                        # Split at the first colon to keep only
+                        # the actual response.
+                        if ":" in value:
+                            extracted_value = value.split(
+                                ":",
+                                1,
+                            )[1].strip()
+                        else:
+                            extracted_value = value
+
+                        result[field_name] = extracted_value
+                        break
+
+        return result
+
+    def extract_transition_plan(self):
+        table = self.find_table([
+            "TRANSITION PLAN",
+            "Transition Plan",
+        ])
+
+        if table is None:
+            return {}
+
+        result = {
+            "treatment_report_status": "",
+            "exit_plan_criteria": "",
+            "individualized_timeline": "",
+            "generalization_expectations": "",
+            "service_fading_plan": "",
+        }
+
+        question_labels = {
+            "please list exit plan/criteria":
+                "exit_plan_criteria",
+
+            "please include an individualized timeline":
+                "individualized_timeline",
+
+            "what is the expectation for generalization":
+                "generalization_expectations",
+
+            "please provide a description of how the level of services will be faded out":
+                "service_fading_plan",
+        }
+
+        for row_index, row in enumerate(table):
+            if not row:
+                continue
+
+            first_value = next(
+                (
+                    cell.strip()
+                    for cell in row
+                    if cell.strip()
+                ),
+                "",
+            )
+
+            if not first_value:
+                continue
+
+            normalized_value = self.normalize_label(first_value)
+
+            # -------------------------
+            # TREATMENT REPORT STATUS
+            # -------------------------
+            if normalized_value.startswith("final treatment report"):
+                result["treatment_report_status"] = first_value
+                continue
+
+            # -------------------------
+            # QUESTION / ANSWER FIELDS
+            # -------------------------
+            for label, field_name in question_labels.items():
+
+                if normalized_value.startswith(label):
+
+                    # The response should be the next
+                    # populated row after the question.
+                    for next_row in table[row_index + 1:]:
+                        answer = next(
+                            (
+                                cell.strip()
+                                for cell in next_row
+                                if cell.strip()
+                            ),
+                            "",
+                        )
+
+                        if answer:
+                            result[field_name] = answer
+                            break
+
+                    break
+
+        return result
+
+    def extract_crisis_plan(self):
+        table = self.find_table([
+            "CRISIS PLAN",
+            "Crisis Plan",
+        ])
+
+        if table is None:
+            return {}
+
+        for row_index, row in enumerate(table):
+            for cell in row:
+                normalized_cell = self.normalize_label(cell)
+
+                # Dynamically locate the Crisis Plan heading
+                if normalized_cell == "crisis plan":
+
+                    # Search everything following the heading
+                    for next_row in table[row_index + 1:]:
+                        value = next(
+                            (
+                                cell.strip()
+                                for cell in next_row
+                                if cell.strip()
+                            ),
+                            "",
+                        )
+
+                        if not value:
+                            continue
+
+                        normalized_value = self.normalize_label(value)
+
+                        # Skip the template instruction
+                        if normalized_value.startswith(
+                            "define what steps the member"
+                        ):
+                            continue
+
+                        return {
+                            "crisis_plan": value
+                        }
+
+        return {}
+
+    def extract_summary_recommendations(self):
+        table = self.find_table([
+            "SUMMARY AND RECOMMENDATIONS",
+            "Summary and Recommendations",
+        ])
+
+        if table is None:
+            return {}
+
+        result = {
+            "clinical_summary": "",
+            "service_requests": [],
+        }
+
+        header_map = {}
+        header_row_index = None
+
+        for row_index, row in enumerate(table):
+            for column_index, cell in enumerate(row):
+                value = cell.strip()
+
+                if not value:
+                    continue
+
+                normalized_value = self.normalize_label(value)
+
+                # -------------------------
+                # CLINICAL SUMMARY
+                # -------------------------
+                if normalized_value.startswith(
+                    "provide a clinical summary"
+                ):
+                    # Find the next populated row after
+                    # the clinical-summary instruction.
+                    for next_row in table[row_index + 1:]:
+                        summary = next(
+                            (
+                                next_cell.strip()
+                                for next_cell in next_row
+                                if next_cell.strip()
+                            ),
+                            "",
+                        )
+
+                        if summary:
+                            result["clinical_summary"] = summary
+                            break
+
+                # -------------------------
+                # SERVICE TABLE HEADER
+                # -------------------------
+                if "hcpcs" in normalized_value and "code" in normalized_value:
+                    header_row_index = row_index
+
+                    for header_index, header_cell in enumerate(row):
+                        normalized_header = self.normalize_label(
+                            header_cell
+                        )
+
+                        if (
+                            "hcpcs" in normalized_header
+                            and "code" in normalized_header
+                        ):
+                            header_map[
+                                "hcpcs_code_modifiers"
+                            ] = header_index
+
+                        elif normalized_header == "description":
+                            header_map[
+                                "description"
+                            ] = header_index
+
+                        elif (
+                            "total hours requested per month"
+                            in normalized_header
+                            and "telehealth" not in normalized_header
+                        ):
+                            header_map[
+                                "hours_per_month"
+                            ] = header_index
+
+                        elif (
+                            "total units requested per 6 month"
+                            in normalized_header
+                        ):
+                            header_map[
+                                "units_per_6_months"
+                            ] = header_index
+
+                        elif (
+                            "location of service"
+                            in normalized_header
+                        ):
+                            header_map[
+                                "location_of_service"
+                            ] = header_index
+
+                        elif (
+                            "telehealth"
+                            in normalized_header
+                            and "hours" in normalized_header
+                        ):
+                            header_map[
+                                "telehealth_hours_per_month"
+                            ] = header_index
+
+                    break
+
+            if header_row_index is not None:
+                break
+
+        # -------------------------
+        # SERVICE REQUEST ROWS
+        # -------------------------
+        if header_row_index is not None and header_map:
+            for row in table[header_row_index + 1:]:
+
+                service = {}
+
+                for field_name, column_index in header_map.items():
+                    if column_index < len(row):
+                        service[field_name] = row[
+                            column_index
+                        ].strip()
+                    else:
+                        service[field_name] = ""
+
+                # Only keep actual service rows
+                code = service.get(
+                    "hcpcs_code_modifiers",
+                    "",
+                )
+
+                if code:
+                    result["service_requests"].append(service)
+
+        return result
+
+    def extract_parent_guardian_involvement(self):
+        result = {
+            "involved_in_treatment_plan": None,
+            "agrees_with_treatment_plan": None,
+            "explanation_if_no": "",
+        }
+
+        # -------------------------
+        # YES / NO CHECKBOXES
+        # -------------------------
+        if self.docx_extractor is not None:
+            result["involved_in_treatment_plan"] = (
+                self.docx_extractor.get_yes_no_checkbox_by_label([
+                    "Was the Parent/guardian involved in the development of the treatment plan?",
+                    "Was the Parent/guardian involved in the development of the treatment plan",
+                ])
+            )
+
+            result["agrees_with_treatment_plan"] = (
+                self.docx_extractor.get_yes_no_checkbox_by_label([
+                    "Is the parent/guardian in agreement with the submitted treatment plan?",
+                    "Is the parent/guardian in agreement with the submitted treatment plan",
+                ])
+            )
+
+        # -------------------------
+        # EXPLANATION IF NO
+        # -------------------------
+        table = self.find_table([
+            "PARENT/CAREGIVER OR LEGAL GUARDIAN INVOLVEMENT",
+            "Parent/Caregiver or Legal Guardian Involvement",
+        ])
+
+        if table is None:
+            return result
+
+        explanation_labels = [
+            "If No to any response, please provide an explanation",
+        ]
+
+        for row_index, row in enumerate(table):
+            for column_index, cell in enumerate(row):
+                normalized_cell = self.normalize_label(cell)
+
+                if any(
+                    normalized_cell.startswith(
+                        self.normalize_label(label)
+                    )
+                    for label in explanation_labels
+                ):
+                    # First try another cell in the same row
+                    for value_cell in row[column_index + 1:]:
+                        value = value_cell.strip()
+
+                        if (
+                            value
+                            and not value.lower().startswith(
+                                "if no to any response"
+                            )
+                        ):
+                            result["explanation_if_no"] = value
+                            return result
+
+                    # Otherwise search following rows
+                    for next_row in table[row_index + 1:]:
+                        value = next(
+                            (
+                                next_cell.strip()
+                                for next_cell in next_row
+                                if next_cell.strip()
+                            ),
+                            "",
+                        )
+
+                        if value:
+                            result["explanation_if_no"] = value
+                            return result
+
+        return result
+
+            
