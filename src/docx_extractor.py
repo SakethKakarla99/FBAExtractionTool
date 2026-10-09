@@ -147,3 +147,39 @@ class DOCXExtractor:
                         return None
 
         return None
+
+    def get_signature_presence_by_role(self, role_label):
+        for table in self.document.tables:
+
+            # Identify the signature table dynamically
+            table_text = " ".join(
+                cell.text.lower()
+                for row in table.rows
+                for cell in row.cells
+            )
+
+            if role_label.lower() not in table_text:
+                continue
+
+            for row in table.rows:
+                if not any(
+                    cell.text.strip().lower().startswith("signature:")
+                    for cell in row.cells
+                ):
+                    continue
+
+                for cell in row.cells:
+                    drawings = cell._tc.xpath(
+                        './/*[local-name()="drawing"]'
+                    )
+
+                    pictures = cell._tc.xpath(
+                        './/*[local-name()="pict"]'
+                    )
+
+                    if drawings or pictures:
+                        return True
+
+                return False
+
+        return False

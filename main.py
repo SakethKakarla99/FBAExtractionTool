@@ -2,6 +2,7 @@ from src.docx_extractor import *
 from src.fba_extractor import *
 
 
+
 FILE_PATH = "documents/fba.docx"
 
 docx_extractor = DOCXExtractor(FILE_PATH)
@@ -326,4 +327,24 @@ print(
 )
 
 for key, value in parent_guardian_involvement.items():
+    print(f"{key}: {value}")
+
+signatures = fba_extractor.extract_signatures()
+
+print("\n========== SIGNATURES ==========")
+
+for signature in signatures:
+    print("\n--------------------")
+
+    for key, value in signature.items():
+        print(f"{key}: {value}")
+
+
+telehealth_consent = (
+    fba_extractor.extract_telehealth_consent()
+)
+
+print("\n========== TELEHEALTH CONSENT ==========")
+
+for key, value in telehealth_consent.items():
     print(f"{key}: {value}")

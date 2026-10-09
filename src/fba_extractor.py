@@ -2303,5 +2303,227 @@ class FBAExtractor:
                             return result
 
         return result
+    
+    def extract_signatures(self):
+        signatures = []
 
-            
+        role_labels = {
+            "report written by": "report_writer",
+            "report reviewed by": "report_reviewer",
+        }
+
+        field_labels = {
+            "title, license/certificate": "title_license",
+            "date of report completed": "report_completion_date",
+        }
+
+        for table in self.tables:
+            role = None
+
+            # -------------------------
+            # IDENTIFY SIGNATURE ROLE
+            # -------------------------
+            for row in table:
+                if not row:
+                    continue
+
+                first_value = next(
+                    (cell.strip() for cell in row if cell.strip()),
+                    ""
+                )
+
+                normalized = self.normalize_label(first_value)
+
+                for label, role_name in role_labels.items():
+                    if normalized.startswith(label):
+                        role = role_name
+                        break
+
+                if role:
+                    break
+
+            if role is None:
+                continue
+
+            result = {
+                "role": role,
+                "name_credentials": "",
+                "title_license": "",
+                "report_completion_date": "",
+                "signature_date": "",
+                "signature_present": None,
+            }
+
+            # -------------------------
+            # EXTRACT SIGNATURE FIELDS
+            # -------------------------
+            for row in table:
+                if not row:
+                    continue
+
+                normalized_cells = [
+                    self.normalize_label(cell)
+                    for cell in row
+                ]
+
+                for index, normalized_cell in enumerate(normalized_cells):
+
+                    # Name and credentials
+                    if normalized_cell.startswith(
+                        tuple(role_labels.keys())
+                    ):
+                        result["name_credentials"] = next(
+                            (
+                                value.strip()
+                                for value in row[index + 1:]
+                                if value.strip()
+                                and self.normalize_label(value)
+                                != normalized_cell
+                            ),
+                            "",
+                        )
+
+                    # Title/license and report completion date
+                    for label, field_name in field_labels.items():
+                        if normalized_cell.startswith(label):
+                            result[field_name] = next(
+                                (
+                                    value.strip()
+                                    for value in row[index + 1:]
+                                    if value.strip()
+                                    and self.normalize_label(value)
+                                    != normalized_cell
+                                ),
+                                "",
+                            )
+
+                    # Signature date
+                    if normalized_cell == "date":
+                        result["signature_date"] = next(
+                            (
+                                value.strip()
+                                for value in row[index + 1:]
+                                if value.strip()
+                            ),
+                            "",
+                        )
+
+            # -------------------------
+            # DETECT EMBEDDED SIGNATURE
+            # -------------------------
+            if self.docx_extractor is not None:
+                role_label = (
+                    "Report written by"
+                    if role == "report_writer"
+                    else "Report reviewed by"
+                )
+
+                result["signature_present"] = (
+                    self.docx_extractor.get_signature_presence_by_role(
+                        role_label
+                    )
+                )
+
+            signatures.append(result)
+
+        return signatures
+
+
+    def extract_telehealth_consent(self):
+        result = {
+            "telehealth_consent": None,
+            "consent_date": "",
+            "no_telehealth_services": None,
+        }
+
+        table = self.find_table([
+            "Telehealth Consent Confirmation",
+            "Telehealth Consent",
+        ])
+
+        if table is None:
+            return result
+
+        # Extract consent date dynamically
+        for row in table:
+            for cell in row:
+                value = cell.strip()
+
+                if self.normalize_label(value).startswith(
+                    "if yes, please confirm the date consent obtained"
+                ):
+                    if ":" in value:
+                        result["consent_date"] = value.split(
+                            ":", 1
+                        )[1].strip()
+
+        # Extract checkbox states from Word XML
+        if self.docx_extractor is not None:
+
+            for word_table in self.docx_extractor.document.tables:
+
+                heading_found = any(
+                    "telehealth consent confirmation" in cell.text.lower()
+                    for row in word_table.rows
+                    for cell in row.cells
+                )
+
+                if not heading_found:
+                    continue
+
+                for row in word_table.rows:
+                    for cell in row.cells:
+
+                        if "consent was obtained" not in cell.text.lower():
+                            continue
+
+                        checkboxes = cell._tc.xpath(
+                            './/*[local-name()="checkbox"]'
+                        )
+
+                        checkbox_states = []
+
+                        for checkbox in checkboxes:
+                            checked_elements = checkbox.xpath(
+                                './*[local-name()="checked"]'
+                            )
+
+                            if not checked_elements:
+                                checkbox_states.append(False)
+                                continue
+
+                            checked_element = checked_elements[0]
+
+                            checked_value = next(
+                                (
+                                    attribute_value
+                                    for attribute_name, attribute_value
+                                    in checked_element.attrib.items()
+                                    if attribute_name.endswith("}val")
+                                    or attribute_name == "val"
+                                ),
+                                None
+                            )
+
+                            checkbox_states.append(
+                                checked_value == "1"
+                            )
+
+                        if len(checkbox_states) == 3:
+                            yes_checked = checkbox_states[0]
+                            no_checked = checkbox_states[1]
+                            na_checked = checkbox_states[2]
+
+                            if sum(checkbox_states) == 1:
+                                result["telehealth_consent"] = (
+                                    "Yes" if yes_checked
+                                    else "No" if no_checked
+                                    else "N/A"
+                                )
+                                result["no_telehealth_services"] = na_checked
+
+                        return result
+
+        return result
+
+                
