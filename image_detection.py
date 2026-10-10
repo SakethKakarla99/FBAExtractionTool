@@ -9,50 +9,69 @@ namespaces = {
     "c": "http://schemas.openxmlformats.org/drawingml/2006/chart"
 }
 
-charts = []
+def extract_chart_data(docx_path):
+    charts = []
 
-with ZipFile(docx_path, "r") as docx:
+    with ZipFile(docx_path, "r") as docx:
 
-    chart_files = [
-        name for name in docx.namelist()
-        if name.startswith("word/charts/chart")
-        and name.endswith(".xml")
-    ]
+        chart_files = [
+            name for name in docx.namelist()
+            if name.startswith("word/charts/chart")
+            and name.endswith(".xml")
+        ]
 
-    for chart_file in chart_files:
-        root = ET.fromstring(docx.read(chart_file))
+        for chart_file in chart_files:
+            root = ET.fromstring(docx.read(chart_file))
 
-        for series in root.findall(".//c:ser", namespaces):
+            for series_index, series in enumerate(
+                root.findall(".//c:ser", namespaces)
+            ):
+                categories = {}
+                values = {}
 
-            categories = {}
-            values = {}
+                for point in series.findall(
+                    "./c:cat//c:pt", namespaces
+                ):
+                    value = point.find("c:v", namespaces)
 
-            for point in series.findall(".//c:cat//c:pt", namespaces):
-                index = int(point.get("idx"))
-                value = point.find("c:v", namespaces)
+                    if value is not None and value.text:
+                        categories[int(point.get("idx"))] = (
+                            value.text.strip()
+                        )
 
-                if value is not None and value.text:
-                    categories[index] = value.text.strip()
+                for point in series.findall(
+                    "./c:val//c:pt", namespaces
+                ):
+                    value = point.find("c:v", namespaces)
 
-            for point in series.findall(".//c:val//c:pt", namespaces):
-                index = int(point.get("idx"))
-                value = point.find("c:v", namespaces)
+                    if value is not None and value.text:
+                        values[int(point.get("idx"))] = float(
+                            value.text
+                        )
 
-                if value is not None and value.text:
-                    values[index] = float(value.text)
+                scores = {
+                    categories[index]: (
+                        int(value)
+                        if value.is_integer()
+                        else value
+                    )
+                    for index, value in values.items()
+                    if index in categories
+                }
 
-            scores = {
-                categories[index]: (
-                    int(value) if value.is_integer() else value
-                )
-                for index, value in values.items()
-                if index in categories
-            }
+                charts.append({
+                    "chart_file": chart_file,
+                    "series_index": series_index,
+                    "scores": scores,
+                    "extraction_method": "chart_xml"
+                })
 
-            charts.append({
-                "chart_file": chart_file,
-                "scores": scores
-            })
+    return charts
 
-print("\n========== EXTRACTED CHART DATA ==========")
-print(json.dumps(charts, indent=4))
+
+if __name__ == "__main__":
+
+    charts = extract_chart_data(docx_path)
+
+    print("\n========== EXTRACTED CHART DATA ==========")
+    print(json.dumps(charts, indent=4))
