@@ -171,17 +171,17 @@ class FBAExtractor:
 
         return identification
 
+    
     def extract_service_history(self):
         table = self.find_table([
             "Service Initiation Date",
             "Service Start Date",
             "Date ABA first began",
-            "Prior Applied Behavioral Health Agencies",])
+            "Prior Applied Behavioral Health Agencies",
+        ])
 
         if table is None:
             return {}
-
-        
 
         field_labels = {
             "service_initiation_date": [
@@ -208,6 +208,7 @@ class FBAExtractor:
 
         service_history = {}
 
+        # Extract known fields
         for field_name, aliases in field_labels.items():
             service_history[field_name] = self.find_value_after_labels(
                 table,
@@ -215,7 +216,42 @@ class FBAExtractor:
                 all_labels
             )
 
+        # Track values already extracted
+        known_values = {
+            str(value).strip()
+            for value in service_history.values()
+            if value is not None
+        }
+
+        # Normalize known labels for comparison
+        normalized_labels = {
+            self.normalize_label(label)
+            for label in all_labels
+        }
+
+        # Preserve values that could not be classified
+        unclassified_values = []
+
+        for row in table:
+            for cell in row:
+                value = str(cell).strip()
+
+                if not value:
+                    continue
+
+                if value in known_values:
+                    continue
+
+                if self.normalize_label(value) in normalized_labels:
+                    continue
+
+                if value not in unclassified_values:
+                    unclassified_values.append(value)
+
+        service_history["unclassified_values"] = unclassified_values
+
         return service_history
+
 
     def extract_administrative_contact(self):
         table = self.find_table([
@@ -1653,10 +1689,17 @@ class FBAExtractor:
             "replacement_behavior_goals": replacement_goals,
         }
 
+    
     def extract_skill_acquisition_goals(self):
+        import re
+
         intervention_areas = []
         current_area = None
         current_goal = None
+        expecting_description = False
+
+        def extract_after_colon(value):
+            return value.split(":", 1)[1].strip() if ":" in value else value.strip()
 
         for table in self.tables:
             for row in table:
@@ -1664,12 +1707,8 @@ class FBAExtractor:
                     continue
 
                 first_value = next(
-                    (
-                        cell.strip()
-                        for cell in row
-                        if cell.strip()
-                    ),
-                    "",
+                    (cell.strip() for cell in row if cell.strip()),
+                    ""
                 )
 
                 if not first_value:
@@ -1677,96 +1716,100 @@ class FBAExtractor:
 
                 normalized_value = self.normalize_label(first_value)
 
-                # -------------------------
-                # INTERVENTION AREA
-                # -------------------------
-                if normalized_value.startswith("intervention area"):
-                    if ":" in first_value:
-                        area_name = first_value.split(":", 1)[1].strip()
-                    else:
-                        area_name = first_value
-
-                    current_area = {
-                        "intervention_area": area_name,
-                        "goals": [],
-                    }
-
-                    intervention_areas.append(current_area)
+                # Stop when we reach a different major section
+                if current_area is not None and (
+                    normalized_value.startswith("parent/caregiver goals")
+                    or normalized_value.startswith("parent/caregiver goal")
+                    or normalized_value.startswith("plan for generalization")
+                    or normalized_value.startswith("transition plan")
+                    or normalized_value.startswith("crisis plan")
+                    or normalized_value.startswith("summary and recommendations")
+                ):
+                    current_area = None
                     current_goal = None
+                    expecting_description = False
                     continue
 
-                # If we have not found an intervention area yet,
-                # there is nothing to extract.
+                # Intervention area
+                if normalized_value.startswith("intervention area"):
+                    current_area = {
+                        "intervention_area": extract_after_colon(first_value),
+                        "goals": []
+                    }
+                    intervention_areas.append(current_area)
+                    current_goal = None
+                    expecting_description = False
+                    continue
+
                 if current_area is None:
                     continue
 
-                # -------------------------
-                # DATE OF INTRODUCTION
-                # -------------------------
-                if normalized_value.startswith("date of introduction"):
-                    if current_goal is not None:
-                        current_goal["date_of_introduction"] = first_value
+                # Goal heading (optional numbering before the heading)
+                goal_match = re.match(
+                    r"^(?:\d+\.\s*)?skill acquisition goal\s*\d+\s*:",
+                    first_value,
+                    re.IGNORECASE
+                )
+
+                if goal_match:
+                    current_goal = {
+                        "goal_label": goal_match.group(0).strip(),
+                        "goal_description": "",
+                        "date_of_introduction": "",
+                        "location_setting": "",
+                        "baseline_data_date": ""
+                    }
+
+                    current_area["goals"].append(current_goal)
+                    expecting_description = True
+
+                    # Handle a description in the same cell
+                    remaining_text = first_value[goal_match.end():].strip()
+                    if remaining_text:
+                        current_goal["goal_description"] = remaining_text
+                        expecting_description = False
 
                     continue
 
-                # -------------------------
-                # LOCATION / SETTING
-                # -------------------------
+                if current_goal is None:
+                    continue
+
+                # Date of introduction
+                if normalized_value.startswith("date of introduction"):
+                    current_goal["date_of_introduction"] = extract_after_colon(
+                        first_value
+                    )
+                    expecting_description = False
+                    continue
+
+                # Location / setting
                 if normalized_value.startswith(
                     "location/setting of skill acquisition goal"
                 ):
-                    if current_goal is not None:
-                        if ":" in first_value:
-                            location = first_value.split(":", 1)[1].strip()
-                        else:
-                            location = first_value
-
-                        current_goal["location_setting"] = location
-
+                    current_goal["location_setting"] = extract_after_colon(
+                        first_value
+                    )
+                    expecting_description = False
                     continue
 
-                # -------------------------
-                # BASELINE
-                # -------------------------
+                # Baseline data
                 if (
                     normalized_value.startswith("baseline data with dates")
                     or normalized_value.startswith("baseline data and date")
                 ):
-                    if current_goal is not None:
-                        current_goal["baseline_data_date"] = first_value
-
+                    current_goal["baseline_data_date"] = extract_after_colon(
+                        first_value
+                    )
+                    expecting_description = False
                     continue
 
-                # -------------------------
-                # SKILL ACQUISITION GOAL
-                # -------------------------
-                # Valid examples:
-                # "Skill Acquisition Goal 1:"
-                # "1. Skill Acquisition Goal 1:"
-                #
-                # Require the phrase to appear near the beginning
-                # instead of anywhere in a narrative.
-                cleaned_goal_label = normalized_value
-
-                # Remove optional numbering such as "1."
-                if cleaned_goal_label[:1].isdigit():
-                    parts = cleaned_goal_label.split(".", 1)
-
-                    if len(parts) == 2:
-                        cleaned_goal_label = parts[1].strip()
-
-                if cleaned_goal_label.startswith("skill acquisition goal"):
-                    current_goal = {
-                        "goal": first_value,
-                        "date_of_introduction": "",
-                        "location_setting": "",
-                        "baseline_data_date": "",
-                    }
-
-                    current_area["goals"].append(current_goal)
-                    continue
+                # Description immediately following goal heading
+                if expecting_description:
+                    current_goal["goal_description"] = first_value
+                    expecting_description = False
 
         return intervention_areas
+
 
     def extract_parent_caregiver_goals(self):
         participants = []
@@ -1959,6 +2002,7 @@ class FBAExtractor:
 
         return result
 
+    
     def extract_transition_plan(self):
         table = self.find_table([
             "TRANSITION PLAN",
@@ -1969,7 +2013,8 @@ class FBAExtractor:
             return {}
 
         result = {
-            "treatment_report_status": "",
+            "treatment_report_status": None,
+            "treatment_report_selection_method": None,
             "exit_plan_criteria": "",
             "individualized_timeline": "",
             "generalization_expectations": "",
@@ -1979,28 +2024,35 @@ class FBAExtractor:
         question_labels = {
             "please list exit plan/criteria":
                 "exit_plan_criteria",
-
             "please include an individualized timeline":
                 "individualized_timeline",
-
             "what is the expectation for generalization":
                 "generalization_expectations",
-
             "please provide a description of how the level of services will be faded out":
                 "service_fading_plan",
         }
 
+        treatment_options = {
+            "final treatment report":
+                "Final treatment report",
+            "treatment report transition to parent/caregiver":
+                "Transition to parent/caregiver or social skills group",
+            "treatment report with fading":
+                "Fading of interventionist direct hours",
+            "treatment report initial/ongoing relationship":
+                "Initial/ongoing ABA services",
+        }
+
+        # -----------------------------------
+        # EXTRACT NARRATIVE FIELDS
+        # -----------------------------------
         for row_index, row in enumerate(table):
             if not row:
                 continue
 
             first_value = next(
-                (
-                    cell.strip()
-                    for cell in row
-                    if cell.strip()
-                ),
-                "",
+                (cell.strip() for cell in row if cell.strip()),
+                ""
             )
 
             if not first_value:
@@ -2008,30 +2060,13 @@ class FBAExtractor:
 
             normalized_value = self.normalize_label(first_value)
 
-            # -------------------------
-            # TREATMENT REPORT STATUS
-            # -------------------------
-            if normalized_value.startswith("final treatment report"):
-                result["treatment_report_status"] = first_value
-                continue
-
-            # -------------------------
-            # QUESTION / ANSWER FIELDS
-            # -------------------------
             for label, field_name in question_labels.items():
-
                 if normalized_value.startswith(label):
 
-                    # The response should be the next
-                    # populated row after the question.
                     for next_row in table[row_index + 1:]:
                         answer = next(
-                            (
-                                cell.strip()
-                                for cell in next_row
-                                if cell.strip()
-                            ),
-                            "",
+                            (cell.strip() for cell in next_row if cell.strip()),
+                            ""
                         )
 
                         if answer:
@@ -2040,7 +2075,77 @@ class FBAExtractor:
 
                     break
 
+        # -----------------------------------
+        # DETECT TREATMENT REPORT SELECTION
+        # -----------------------------------
+        # The original narrative extraction uses self.tables.
+        # For ink drawings, we also inspect the underlying DOCX XML.
+
+        from docx import Document
+
+        if self.docx_extractor is None:
+            return result
+
+        doc = self.docx_extractor.document
+
+        for doc_table in doc.tables:
+            table_text = " ".join(
+                cell.text
+                for row in doc_table.rows
+                for cell in row.cells
+            )
+
+            if "TRANSITION PLAN" not in table_text.upper():
+                continue
+
+            for row in doc_table.rows:
+                for cell in row.cells:
+                    for paragraph in cell.paragraphs:
+                        option_text = paragraph.text.strip()
+                        normalized_option = self.normalize_label(option_text)
+
+                        for prefix, option_name in treatment_options.items():
+                            if not normalized_option.startswith(prefix):
+                                continue
+
+                            # Standard Word checkbox content controls
+                            checkbox_elements = paragraph._p.xpath(
+                                ".//*[local-name()='checkbox']"
+                            )
+
+                            checked = False
+                            for checkbox in checkbox_elements:
+                                states = checkbox.xpath(
+                                    ".//*[local-name()='checked']"
+                                )
+                                for state in states:
+                                    value = state.get(
+                                        "{http://schemas.microsoft.com/office/word/2010/wordml}val"
+                                    )
+                                    if value in ("1", "true", "on"):
+                                        checked = True
+
+                            if checked:
+                                result["treatment_report_status"] = option_name
+                                result["treatment_report_selection_method"] = (
+                                    "word_checkbox"
+                                )
+                                return result
+
+                            # Ink drawings can indicate handwritten selections.
+                            ink_parts = paragraph._p.xpath(
+                                ".//*[local-name()='contentPart']"
+                            )
+
+                            if ink_parts:
+                                result["treatment_report_status"] = option_name
+                                result["treatment_report_selection_method"] = (
+                                    "ink_drawing_unverified"
+                                )
+                                return result
+
         return result
+
 
     def extract_crisis_plan(self):
         table = self.find_table([
