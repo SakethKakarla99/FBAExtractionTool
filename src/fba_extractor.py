@@ -1266,38 +1266,19 @@ class FBAExtractor:
 
         return diagnoses
 
+    
     def extract_functional_assessments(self):
-        table = self.find_table([
-            "FUNCTIONAL ASSESSMENT OR ANALYSIS OF TARGET BEHAVIORS",
-            "Target Behavior",
-        ])
-
-        if table is None:
-            return []
-
         field_labels = {
-            "operational_definition": [
-                "Operational Definition",
-            ],
-            "course_of_behavior": [
-                "Course of Behavior",
-            ],
-            "baseline_data": [
-                "Baseline Data",
-            ],
+            "operational_definition": ["Operational Definition"],
+            "course_of_behavior": ["Course of Behavior"],
+            "baseline_data": ["Baseline Data"],
             "history_problem_chief_complaint": [
                 "History of the Problem/Chief Complaint",
                 "History of the Problem",
             ],
-            "setting_events": [
-                "Setting Events",
-            ],
-            "trigger_events": [
-                "Trigger Events",
-            ],
-            "consequent_analysis": [
-                "Consequent Analysis",
-            ],
+            "setting_events": ["Setting Events"],
+            "trigger_events": ["Trigger Events"],
+            "consequent_analysis": ["Consequent Analysis"],
             "hypothesized_function": [
                 "Impressions and Analysis of Hypothesized Function",
                 "Hypothesized Function",
@@ -1305,87 +1286,176 @@ class FBAExtractor:
         }
 
         assessments = []
-        current_assessment = None
+        assessments_by_behavior = {}
 
-        for row_index, row in enumerate(table):
-            if not row:
-                continue
+        def first_value(row):
+            return next(
+                (cell.strip() for cell in row if cell and cell.strip()),
+                "",
+            )
 
-            first_cell = row[0].strip()
-            normalized_first_cell = self.normalize_label(first_cell)
+        def match_field(text):
+            normalized = self.normalize_label(text)
 
-            # Dynamically detect Target Behavior 1, 2, 3, etc.
-            if normalized_first_cell.startswith("target behavior"):
-                behavior_name = ""
-
-                # Usually the behavior name is in the next column
-                if len(row) > 1:
-                    behavior_name = row[1].strip()
-
-                current_assessment = {
-                    "target_behavior": behavior_name,
-                }
-
-                assessments.append(current_assessment)
-                continue
-
-            if current_assessment is None:
-                continue
-
-            # Match each assessment field dynamically
             for field_name, aliases in field_labels.items():
-                matched = False
-
                 for alias in aliases:
                     normalized_alias = self.normalize_label(alias)
 
                     if (
-                        normalized_first_cell == normalized_alias
-                        or normalized_first_cell.startswith(
-                            normalized_alias + ":"
-                        )
-                        or normalized_first_cell.startswith(
-                            normalized_alias + " "
-                        )
+                        normalized == normalized_alias
+                        or normalized.startswith(normalized_alias + ":")
+                        or normalized.startswith(normalized_alias + " ")
                     ):
-                        matched = True
-                        break
+                        return field_name, alias
 
-                if not matched:
+            return None, None
+
+        def is_target_row(row):
+            if not row:
+                return False
+
+            normalized = self.normalize_label(first_value(row))
+
+            return (
+                normalized == "target behavior"
+                or normalized.startswith("target behavior ")
+                or normalized.startswith("target behavior:")
+            )
+
+        def behavior_name_from_row(row):
+            if len(row) > 1 and row[1] and row[1].strip():
+                return row[1].strip()
+
+            text = first_value(row)
+
+            if ":" in text:
+                return text.split(":", 1)[1].strip()
+
+            return ""
+
+        def get_field_value(table, row_index, alias):
+            text = first_value(table[row_index])
+            normalized_alias = self.normalize_label(alias)
+
+            # Handle inline values:
+            # Operational Definition: Description
+            if ":" in text and "\n" not in text:
+                prefix, remainder = text.split(":", 1)
+
+                if self.normalize_label(prefix) == normalized_alias:
+                    if remainder.strip():
+                        return remainder.strip()
+
+            # Handle values in the following row.
+            if row_index + 1 >= len(table):
+                return ""
+
+            next_row = table[row_index + 1]
+            next_value = first_value(next_row)
+
+            if not next_value or is_target_row(next_row):
+                return ""
+
+            next_field, _ = match_field(next_value)
+
+            if next_field is not None:
+                return ""
+
+            if self.normalize_label(next_value) in {
+                "identifying behavior",
+                "antecedent analysis",
+                "behavior intervention plan",
+            }:
+                return ""
+
+            return next_value
+
+        # Search all tables, regardless of their headings.
+        for table in self.tables:
+            if not table:
+                continue
+
+            target_indices = [
+                index
+                for index, row in enumerate(table)
+                if is_target_row(row)
+            ]
+
+            for position, start_index in enumerate(target_indices):
+                end_index = (
+                    target_indices[position + 1]
+                    if position + 1 < len(target_indices)
+                    else len(table)
+                )
+
+                # Identify whether this target-behavior block
+                # contains a Functional Assessment.
+                fields_found = set()
+
+                for row in table[start_index + 1:end_index]:
+                    field_name, _ = match_field(first_value(row))
+
+                    if field_name:
+                        fields_found.add(field_name)
+
+                # Require assessment-specific labels to avoid
+                # confusing BIP sections with assessments.
+                required_fields = {
+                    "operational_definition",
+                    "course_of_behavior",
+                    "baseline_data",
+                }
+
+                if not required_fields.issubset(fields_found):
                     continue
 
-                value = ""
+                behavior_name = behavior_name_from_row(
+                    table[start_index]
+                )
 
-                # In this template the value follows the label row.
-                if row_index + 1 < len(table):
-                    next_row = table[row_index + 1]
+                if not behavior_name:
+                    behavior_name = "Unspecified Target Behavior"
 
-                    # Merged cells can repeat the same value,
-                    # so take the first populated cell.
-                    value = next(
-                        (
-                            cell.strip()
-                            for cell in next_row
-                            if cell.strip()
-                        ),
-                        "",
+                behavior_key = behavior_name.casefold()
+
+                if behavior_key not in assessments_by_behavior:
+                    current_assessment = {
+                        "target_behavior": behavior_name,
+                    }
+
+                    assessments_by_behavior[behavior_key] = (
+                        current_assessment
+                    )
+                    assessments.append(current_assessment)
+
+                else:
+                    current_assessment = (
+                        assessments_by_behavior[behavior_key]
                     )
 
-                current_assessment[field_name] = value
-                break
+                # Extract all assessment fields.
+                for row_index in range(start_index + 1, end_index):
+                    text = first_value(table[row_index])
+
+                    field_name, alias = match_field(text)
+
+                    if field_name is None:
+                        continue
+
+                    value = get_field_value(
+                        table,
+                        row_index,
+                        alias,
+                    )
+
+                    if value:
+                        current_assessment[field_name] = value
 
         return assessments
 
+
+    
     def extract_behavior_intervention_plans(self):
-        table = self.find_table([
-            "BEHAVIOR INTERVENTION PLAN",
-            "Ecological interventions",
-            "Training of replacement behaviors",
-        ])
-
-        if table is None:
-            return []
-
         field_labels = {
             "ecological_interventions": [
                 "Ecological interventions",
@@ -1406,72 +1476,179 @@ class FBAExtractor:
         }
 
         plans = []
-        current_plan = None
+        plans_by_behavior = {}
 
-        for row_index, row in enumerate(table):
-            if not row:
-                continue
-
-            first_cell = row[0].strip()
-            normalized_first = self.normalize_label(first_cell)
-
-            # Detect Target Behavior 1, 2, 3, etc.
-            if normalized_first.startswith("target behavior"):
-                target_behavior = ""
-
-                if len(row) > 1:
-                    target_behavior = row[1].strip()
-
-                current_plan = {
-                    "target_behavior": target_behavior,
-                }
-
-                plans.append(current_plan)
-                continue
-
-            if current_plan is None:
-                continue
+        def get_field_name(text):
+            normalized = self.normalize_label(text)
 
             for field_name, aliases in field_labels.items():
-                matched = False
-
                 for alias in aliases:
                     normalized_alias = self.normalize_label(alias)
 
                     if (
-                        normalized_first == normalized_alias
-                        or normalized_first.startswith(
-                            normalized_alias + ":"
-                        )
-                        or normalized_first.startswith(
-                            normalized_alias + " "
-                        )
+                        normalized == normalized_alias
+                        or normalized.startswith(normalized_alias + ":")
+                        or normalized.startswith(normalized_alias + " ")
                     ):
-                        matched = True
-                        break
+                        return field_name, alias
 
-                if not matched:
+            return None, None
+
+        def get_first_value(row):
+            for cell in row:
+                if cell and cell.strip():
+                    return cell.strip()
+            return ""
+
+        def extract_field_value(table, row_index, field_name, alias):
+            row = table[row_index]
+            first_cell = get_first_value(row)
+
+            normalized_alias = self.normalize_label(alias)
+            normalized = self.normalize_label(first_cell)
+
+            value = ""
+
+            # Determine whether the row contains a heading
+            # or a heading followed by actual content.
+            #
+            # Template headings with multiline instructions
+            # are treated as labels, not extracted values.
+
+            is_label_row = (
+                normalized == normalized_alias
+                or "\n" in first_cell
+            )
+
+            if not is_label_row and ":" in first_cell:
+                # Extract content following an inline label.
+                prefix, remainder = first_cell.split(":", 1)
+
+                if self.normalize_label(prefix) == normalized_alias:
+                    value = remainder.strip()
+
+            # If the label row contains no inline value,
+            # retrieve the content from the next row.
+            if not value and row_index + 1 < len(table):
+                next_value = get_first_value(table[row_index + 1])
+
+                next_normalized = self.normalize_label(next_value)
+                next_field, _ = get_field_name(next_value)
+
+                # Avoid extracting another section heading
+                # or target behavior as a field value.
+                if (
+                    next_value
+                    and not next_normalized.startswith("target behavior")
+                ):
+                    if next_field is None:
+                        value = next_value
+
+                    elif (
+                        next_field == field_name
+                        and ":" in next_value
+                        and "\n" not in next_value
+                    ):
+                        # Some templates repeat the label in
+                        # the value row:
+                        #
+                        # Ecological interventions: Description
+                        #
+                        # Extract only the description.
+                        prefix, remainder = next_value.split(":", 1)
+
+                        if (
+                            self.normalize_label(prefix)
+                            == normalized_alias
+                        ):
+                            value = remainder.strip()
+
+            return value
+
+        for table in self.tables:
+            if not table:
+                continue
+
+            # Identify Behavior Intervention Plan tables.
+            heading = " ".join(
+                cell.strip()
+                for row in table[:2]
+                for cell in row
+                if cell and cell.strip()
+            ).lower()
+
+            if "behavior intervention plan" not in heading:
+                continue
+
+            current_plan = None
+
+            for row_index, row in enumerate(table):
+                if not row:
                     continue
 
-                value = ""
+                first_cell = get_first_value(row)
+                normalized = self.normalize_label(first_cell)
 
-                # Content follows the label row
-                if row_index + 1 < len(table):
-                    next_row = table[row_index + 1]
+                # ------------------------------------
+                # TARGET BEHAVIOR
+                # ------------------------------------
+                if normalized.startswith("target behavior"):
+                    behavior_name = ""
 
-                    value = next(
-                        (
-                            cell.strip()
-                            for cell in next_row
-                            if cell.strip()
-                        ),
-                        "",
-                    )
+                    if len(row) > 1 and row[1]:
+                        behavior_name = row[1].strip()
 
-                current_plan[field_name] = value
-                break
+                    if not behavior_name:
+                        behavior_name = "Unspecified Target Behavior"
+
+                    behavior_key = behavior_name.casefold()
+
+                    if behavior_key not in plans_by_behavior:
+                        current_plan = {
+                            "target_behavior": behavior_name,
+                        }
+
+                        plans_by_behavior[behavior_key] = current_plan
+                        plans.append(current_plan)
+
+                    else:
+                        current_plan = plans_by_behavior[behavior_key]
+
+                    continue
+
+                if current_plan is None:
+                    continue
+
+                # ------------------------------------
+                # INTERVENTION FIELDS
+                # ------------------------------------
+                field_name, alias = get_field_name(first_cell)
+
+                if field_name is None:
+                    continue
+
+                value = extract_field_value(
+                    table,
+                    row_index,
+                    field_name,
+                    alias,
+                )
+
+                if value:
+                    current_plan[field_name] = value
+
+        # Remove entries without any intervention data.
+        plans = [
+            plan
+            for plan in plans
+            if any(
+                field_name in plan
+                for field_name in field_labels
+            )
+        ]
 
         return plans
+
 
 
     def extract_mediator_analysis(self):
@@ -1815,123 +1992,124 @@ class FBAExtractor:
         participants = []
         goals = []
 
-        in_parent_goal_section = False
+        in_section = False
+        in_goals = False
         current_goal = None
+
+        participant_keywords = (
+            "mother",
+            "father",
+            "parent",
+            "caregiver",
+            "guardian",
+            "grandmother",
+            "grandfather",
+            "daycare staff",
+            "babysitter",
+            "respite",
+        )
+
+        end_section_headings = {
+            "generalization and maintenance plan",
+            "transition plan",
+            "behavior intervention plan",
+        }
 
         for table in self.tables:
             for row in table:
                 if not row:
                     continue
 
-                non_empty_values = [
+                values = [
                     cell.strip()
                     for cell in row
-                    if cell.strip()
+                    if cell and cell.strip()
                 ]
 
-                if not non_empty_values:
+                if not values:
                     continue
 
-                first_value = non_empty_values[0]
-                normalized_value = self.normalize_label(first_value)
+                first_value = values[0]
+                normalized = self.normalize_label(first_value)
 
                 # -------------------------
-                # SECTION HEADING
+                # START SECTION
                 # -------------------------
-                if normalized_value == "parent/caregiver goals":
-                    in_parent_goal_section = True
+                if normalized == "parent/caregiver goals":
+                    in_section = True
+                    in_goals = False
                     current_goal = None
                     continue
 
-                if not in_parent_goal_section:
+                if not in_section:
+                    continue
+
+                # -------------------------
+                # END SECTION
+                # -------------------------
+                if (
+                    normalized.startswith("plan for generalization")
+                    or normalized in end_section_headings
+                ):
+                    in_section = False
+                    current_goal = None
+                    continue
+
+                # -------------------------
+                # SKIP INSTRUCTIONS / HEADINGS
+                # -------------------------
+                if (
+                    normalized.startswith("participants in parent training")
+                    or "parent/caregiver goals should specify" in normalized
+                    or normalized.startswith("previously mastered skills")
+                    or normalized.startswith("identify measurable")
+                ):
                     continue
 
                 # -------------------------
                 # PARTICIPANTS
                 # -------------------------
-                if normalized_value.startswith(
-                    "participants in parent training"
-                ):
-                    continue
+                if not in_goals:
 
-                # Participant rows occur before the first goal.
-                if current_goal is None and not goals:
-                    if (
-                        "parent/caregiver goals should specify"
-                        in normalized_value
-                    ):
-                        continue
-
-                    # Don't treat table headings/metadata as participants.
-                    if not normalized_value.startswith(
-                        "parent/caregiver goal"
-                    ):
-                        participant = {
-                            "participant": first_value,
-                            "previously_mastered_skills": (
-                                row[1].strip()
-                                if len(row) > 1
-                                else ""
-                            ),
-                        }
-
-                        participants.append(participant)
-                        continue
-
-                # -------------------------
-                # DATE INITIATED
-                # -------------------------
-                if normalized_value.startswith("date initiated"):
-                    if current_goal is not None:
-                        current_goal["date_initiated"] = first_value
-
-                    continue
-
-                # -------------------------
-                # LOCATION / SETTING
-                # -------------------------
-                # These rows begin with Parent/Caregiver goal
-                # but contain only the setting choices.
-                if (
-                    normalized_value.startswith("parent/caregiver goal")
-                    and (
-                        "telehealth" in normalized_value
-                        or "home" in normalized_value
-                        or "school" in normalized_value
-                        or "clinic" in normalized_value
-                        or "community" in normalized_value
+                    # Avoid treating goal descriptions or headings
+                    # as participants.
+                    is_goal_description = (
+                        normalized.startswith("by ")
+                        or (
+                            normalized.startswith("parent/caregiver goal")
+                            and "long-term" in normalized
+                        )
                     )
-                    and "long-term" not in normalized_value
-                ):
-                    if current_goal is not None:
-                        if ":" in first_value:
-                            location = first_value.split(":", 1)[1].strip()
-                        else:
-                            location = first_value
 
-                        current_goal["location_setting"] = location
+                    if (
+                        not is_goal_description
+                        and not normalized.startswith("parent/caregiver goal")
+                    ):
+                        is_participant = any(
+                            keyword in normalized
+                            for keyword in participant_keywords
+                        )
 
-                    continue
-
-                # -------------------------
-                # BASELINE
-                # -------------------------
-                if (
-                    normalized_value.startswith("baseline data and date")
-                    or normalized_value.startswith("baseline data with dates")
-                ):
-                    if current_goal is not None:
-                        current_goal["baseline_data_date"] = first_value
-
-                    continue
+                        if is_participant:
+                            participants.append({
+                                "participant": first_value,
+                                "previously_mastered_skills": (
+                                    row[1].strip()
+                                    if len(row) > 1 and row[1]
+                                    else ""
+                                ),
+                            })
+                            continue
 
                 # -------------------------
-                # PARENT / CAREGIVER GOAL
+                # GOAL START (LABELED)
                 # -------------------------
                 if (
-                    normalized_value.startswith("parent/caregiver goal")
-                    and "long-term" in normalized_value
+                    normalized.startswith("parent/caregiver goal")
+                    and "long-term" in normalized
                 ):
+                    in_goals = True
+
                     current_goal = {
                         "goal": first_value,
                         "date_initiated": "",
@@ -1940,6 +2118,66 @@ class FBAExtractor:
                     }
 
                     goals.append(current_goal)
+                    continue
+
+                # -------------------------
+                # GOAL START (UNLABELED)
+                # -------------------------
+                if normalized.startswith("by "):
+                    in_goals = True
+
+                    current_goal = {
+                        "goal": first_value,
+                        "date_initiated": "",
+                        "location_setting": "",
+                        "baseline_data_date": "",
+                    }
+
+                    goals.append(current_goal)
+                    continue
+
+                if current_goal is None:
+                    continue
+
+                # -------------------------
+                # DATE INITIATED
+                # -------------------------
+                if normalized.startswith("date initiated"):
+                    current_goal["date_initiated"] = first_value
+                    continue
+
+                # -------------------------
+                # BASELINE DATA
+                # -------------------------
+                if (
+                    normalized.startswith("baseline data and date")
+                    or normalized.startswith("baseline data with dates")
+                ):
+                    current_goal["baseline_data_date"] = first_value
+                    continue
+
+                # -------------------------
+                # LOCATION / SETTING
+                # -------------------------
+                if (
+                    normalized.startswith("parent/caregiver goal")
+                    and "long-term" not in normalized
+                    and any(
+                        word in normalized
+                        for word in (
+                            "telehealth",
+                            "home",
+                            "school",
+                            "clinic",
+                            "community",
+                        )
+                    )
+                ):
+                    current_goal["location_setting"] = (
+                        first_value.split(":", 1)[1].strip()
+                        if ":" in first_value
+                        else first_value
+                    )
                     continue
 
         return {

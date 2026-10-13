@@ -347,25 +347,6 @@ print("\n========== TELEHEALTH CONSENT ==========")
 for key, value in telehealth_consent.items():
     print(f"{key}: {value}")
 
-print("\n========== TRANSITION PLAN TABLE TEST ==========")
-
-for table_index, table in enumerate(tables):
-    for row_index, row in enumerate(table):
-        if any(
-            "final treatment report" in cell.lower()
-            for cell in row
-        ):
-            print(f"\nTable {table_index}, Row {row_index}")
-
-            for nearby_row in table[
-                max(0, row_index - 2):row_index + 4
-            ]:
-                print(nearby_row)
-
-
-
-
-
 
 
 
