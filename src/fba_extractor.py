@@ -2186,59 +2186,134 @@ class FBAExtractor:
         }
 
     def extract_generalization_maintenance_plan(self):
-        table = self.find_table([
-            "PLAN FOR GENERALIZATION",
-            "PLAN FOR GENERALIZATION (INCLUDING TRANSITION TO NATURAL MEDIATORS) AND MAINTENANCE",
-        ])
-
-        if table is None:
-            return {}
-
         field_labels = {
-            "data collection": "data_collection",
-            "procedural reliability": "procedural_reliability",
-            "thinning the schedule of reinforcement": "thinning_reinforcement",
-            "family/caregiver training and monitoring": "family_caregiver_training",
-            "transition to natural mediators": "transition_to_natural_mediators",
-            "relapse prevention": "relapse_prevention",
-            "generalization and maintenance plan": "generalization_maintenance",
+            "data_collection": [
+                "Data Collection",
+            ],
+            "procedural_reliability": [
+                "Procedural Reliability",
+            ],
+            "reinforcement_schedule_thinning": [
+                "Thinning the Schedule of Reinforcement",
+            ],
+            "family_caregiver_training_monitoring": [
+                "Family/Caregiver Training and Monitoring",
+            ],
+            "transition_to_natural_mediators": [
+                "Transition to Natural Mediators",
+            ],
+            "relapse_prevention": [
+                "Relapse Prevention",
+            ],
+            "generalization_maintenance_plan": [
+                "Generalization and Maintenance Plan",
+            ],
         }
 
-        result = {
-            field_name: ""
-            for field_name in field_labels.values()
-        }
+        plan = {}
 
-        for row in table:
-            for cell in row:
-                value = cell.strip()
+        def first_value(row):
+            return next(
+                (
+                    cell.strip()
+                    for cell in row
+                    if cell and cell.strip()
+                ),
+                "",
+            )
 
-                if not value:
+        def match_field(text):
+            for field_name, aliases in field_labels.items():
+                for alias in aliases:
+                    # The label may contain optional instructions:
+                    # Data Collection (include plan to address):
+                    #
+                    # Match the beginning of the label while
+                    # requiring a label boundary afterward.
+
+                    normalized_text = text.strip().casefold()
+                    normalized_alias = alias.casefold()
+
+                    if normalized_text.startswith(normalized_alias):
+                        remainder = normalized_text[
+                            len(normalized_alias):
+                        ]
+
+                        if (
+                            not remainder
+                            or remainder.startswith(":")
+                            or remainder.startswith(" (")
+                        ):
+                            return field_name
+
+            return None
+
+        for table in self.tables:
+            if not table:
+                continue
+
+            # Identify the actual Generalization &
+            # Maintenance Plan section by its heading.
+            heading = first_value(table[0]).casefold()
+
+            if not (
+                "plan for generalization" in heading
+                and "maintenance" in heading
+            ):
+                continue
+
+            for row_index, row in enumerate(table[1:], start=1):
+                text = first_value(row)
+
+                if not text:
                     continue
 
-                normalized_value = self.normalize_label(value)
+                field_name = match_field(text)
 
-                for label, field_name in field_labels.items():
+                if field_name is None:
+                    continue
 
-                    if normalized_value.startswith(label):
-                        # Each field has the format:
-                        #
-                        # Label (include plan to address): Value
-                        #
-                        # Split at the first colon to keep only
-                        # the actual response.
-                        if ":" in value:
-                            extracted_value = value.split(
-                                ":",
-                                1,
-                            )[1].strip()
-                        else:
-                            extracted_value = value
+                value = ""
 
-                        result[field_name] = extracted_value
+                # CASE 1:
+                # Label and description are in the same row.
+                #
+                # Data Collection (include plan to address):
+                # Description...
+
+                if ":" in text:
+                    value = text.split(":", 1)[1].strip()
+
+                # CASE 2:
+                # Label is in one row, value is in the next.
+                #
+                # Data Collection:
+                # Description...
+
+                if not value:
+                    for next_index in range(
+                        row_index + 1,
+                        len(table),
+                    ):
+                        next_text = first_value(
+                            table[next_index]
+                        )
+
+                        if not next_text:
+                            continue
+
+                        # Don't mistake the next field label
+                        # for a description.
+                        if match_field(next_text) is not None:
+                            break
+
+                        value = next_text
                         break
 
-        return result
+                if value:
+                    plan[field_name] = value
+
+        return plan
 
     
     def extract_transition_plan(self):
@@ -2429,141 +2504,169 @@ class FBAExtractor:
 
         return {}
 
+    
     def extract_summary_recommendations(self):
-        table = self.find_table([
-            "SUMMARY AND RECOMMENDATIONS",
-            "Summary and Recommendations",
-        ])
-
-        if table is None:
-            return {}
+        import re
 
         result = {
             "clinical_summary": "",
             "service_requests": [],
         }
 
-        header_map = {}
-        header_row_index = None
+        def unique_cells(row):
+            return list(dict.fromkeys(
+                cell.strip()
+                for cell in row
+                if cell and cell.strip()
+            ))
 
-        for row_index, row in enumerate(table):
-            for column_index, cell in enumerate(row):
-                value = cell.strip()
+        def is_instruction(text):
+            normalized = self.normalize_label(text)
 
-                if not value:
+            instruction_patterns = [
+                "provide a clinical summary",
+                "consider the member",
+                "justify hours requested",
+                "justifies hours requested",
+            ]
+
+            return any(
+                pattern in normalized
+                for pattern in instruction_patterns
+            )
+
+        def is_hcpcs_header(row):
+            combined = " ".join(
+                cell.strip().lower()
+                for cell in row
+                if cell
+            )
+
+            return (
+                "hcpcs" in combined
+                and "description" in combined
+            )
+
+        def is_hcpcs_code(text):
+            return bool(
+                re.fullmatch(
+                    r"[A-Z]\d{4}(?:-[A-Z0-9]+)*",
+                    text.strip().upper(),
+                )
+            )
+
+        # Search all tables rather than relying
+        # on a fixed table number.
+        for table in self.tables:
+            if not table:
+                continue
+
+            heading = " ".join(
+                unique_cells(table[0])
+            ).casefold()
+
+            if not (
+                "summary and recommendations" in heading
+                or "clinical summary" in heading
+            ):
+                continue
+
+            # ----------------------------------
+            # FIND SERVICE TABLE HEADER
+            # ----------------------------------
+            header_row_index = None
+            header_map = {}
+
+            for row_index, row in enumerate(table):
+                if not is_hcpcs_header(row):
                     continue
 
-                normalized_value = self.normalize_label(value)
+                header_row_index = row_index
 
-                # -------------------------
-                # CLINICAL SUMMARY
-                # -------------------------
-                if normalized_value.startswith(
-                    "provide a clinical summary"
-                ):
-                    # Find the next populated row after
-                    # the clinical-summary instruction.
-                    for next_row in table[row_index + 1:]:
-                        summary = next(
-                            (
-                                next_cell.strip()
-                                for next_cell in next_row
-                                if next_cell.strip()
-                            ),
-                            "",
-                        )
+                for column_index, cell in enumerate(row):
+                    normalized = self.normalize_label(cell)
 
-                        if summary:
-                            result["clinical_summary"] = summary
-                            break
+                    if "hcpcs" in normalized and "code" in normalized:
+                        header_map["hcpcs_code_modifiers"] = column_index
 
-                # -------------------------
-                # SERVICE TABLE HEADER
-                # -------------------------
-                if "hcpcs" in normalized_value and "code" in normalized_value:
-                    header_row_index = row_index
+                    elif normalized == "description":
+                        header_map["description"] = column_index
 
-                    for header_index, header_cell in enumerate(row):
-                        normalized_header = self.normalize_label(
-                            header_cell
-                        )
+                    elif (
+                        "total hours requested per month" in normalized
+                        and "telehealth" not in normalized
+                    ):
+                        header_map["hours_per_month"] = column_index
 
-                        if (
-                            "hcpcs" in normalized_header
-                            and "code" in normalized_header
-                        ):
-                            header_map[
-                                "hcpcs_code_modifiers"
-                            ] = header_index
+                    elif "total units requested per 6 month" in normalized:
+                        header_map["units_per_6_months"] = column_index
 
-                        elif normalized_header == "description":
-                            header_map[
-                                "description"
-                            ] = header_index
+                    elif "location of service" in normalized:
+                        header_map["location_of_service"] = column_index
 
-                        elif (
-                            "total hours requested per month"
-                            in normalized_header
-                            and "telehealth" not in normalized_header
-                        ):
-                            header_map[
-                                "hours_per_month"
-                            ] = header_index
+                    elif "telehealth" in normalized and "hours" in normalized:
+                        header_map["telehealth_hours_per_month"] = column_index
 
-                        elif (
-                            "total units requested per 6 month"
-                            in normalized_header
-                        ):
-                            header_map[
-                                "units_per_6_months"
-                            ] = header_index
-
-                        elif (
-                            "location of service"
-                            in normalized_header
-                        ):
-                            header_map[
-                                "location_of_service"
-                            ] = header_index
-
-                        elif (
-                            "telehealth"
-                            in normalized_header
-                            and "hours" in normalized_header
-                        ):
-                            header_map[
-                                "telehealth_hours_per_month"
-                            ] = header_index
-
-                    break
-
-            if header_row_index is not None:
                 break
 
-        # -------------------------
-        # SERVICE REQUEST ROWS
-        # -------------------------
-        if header_row_index is not None and header_map:
+            # ----------------------------------
+            # EXTRACT CLINICAL SUMMARY
+            # ----------------------------------
+            narrative_end = (
+                header_row_index
+                if header_row_index is not None
+                else len(table)
+            )
+
+            narrative_parts = []
+
+            for row in table[1:narrative_end]:
+                for text in unique_cells(row):
+                    if is_instruction(text):
+                        continue
+
+                    narrative_parts.append(text)
+
+            if narrative_parts:
+                result["clinical_summary"] = "\n".join(
+                    narrative_parts
+                )
+
+            # ----------------------------------
+            # EXTRACT SERVICE REQUESTS
+            # ----------------------------------
+            if header_row_index is None:
+                continue
+
+            code_column = header_map.get(
+                "hcpcs_code_modifiers"
+            )
+
+            if code_column is None:
+                continue
+
             for row in table[header_row_index + 1:]:
+                if code_column >= len(row):
+                    continue
+
+                code = row[code_column].strip()
+
+                if not is_hcpcs_code(code):
+                    continue
 
                 service = {}
 
                 for field_name, column_index in header_map.items():
                     if column_index < len(row):
-                        service[field_name] = row[
-                            column_index
-                        ].strip()
+                        service[field_name] = (
+                            row[column_index].strip()
+                            if row[column_index]
+                            else ""
+                        )
                     else:
                         service[field_name] = ""
 
-                # Only keep actual service rows
-                code = service.get(
-                    "hcpcs_code_modifiers",
-                    "",
-                )
-
-                if code:
-                    result["service_requests"].append(service)
+                result["service_requests"].append(service)
 
         return result
 

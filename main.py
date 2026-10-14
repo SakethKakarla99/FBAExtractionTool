@@ -350,3 +350,32 @@ for key, value in telehealth_consent.items():
     print(f"{key}: {value}")
 
 
+print("\n========== CLINICAL SUMMARY DEBUG ==========")
+
+for table_index, table in enumerate(fba_extractor.tables):
+    if not table:
+        continue
+
+    # Check the first two rows for section headings.
+    heading = " ".join(
+        cell.strip()
+        for row in table[:2]
+        for cell in row
+        if cell and cell.strip()
+    ).lower()
+
+    if (
+        "summary and recommendations" in heading
+        or "clinical summary" in heading
+    ):
+        print(f"\nTABLE {table_index}")
+
+        for row_index, row in enumerate(table):
+            # Remove repeated text caused by merged cells.
+            unique_cells = list(dict.fromkeys(
+                cell.strip()
+                for cell in row
+                if cell and cell.strip()
+            ))
+
+            print(f"Row {row_index}: {unique_cells}")
