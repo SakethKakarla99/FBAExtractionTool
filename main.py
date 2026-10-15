@@ -329,15 +329,17 @@ print(
 for key, value in parent_guardian_involvement.items():
     print(f"{key}: {value}")
 
+
 signatures = fba_extractor.extract_signatures()
 
 print("\n========== SIGNATURES ==========")
 
-for signature in signatures:
-    print("\n--------------------")
+for role, signature in signatures.items():
+    print(f"\n---------- {role.upper()} ----------")
 
     for key, value in signature.items():
         print(f"{key}: {value}")
+
 
 
 telehealth_consent = (
@@ -379,3 +381,184 @@ for table_index, table in enumerate(fba_extractor.tables):
             ))
 
             print(f"Row {row_index}: {unique_cells}")
+
+print("\n========== SIGNATURE DEBUG ==========")
+
+keywords = [
+    "signature",
+    "signed",
+    "credential",
+    "date completed",
+    "date signed",
+    "bcba",
+]
+
+for table_index, table in enumerate(fba_extractor.tables):
+    if not table:
+        continue
+
+    for row_index, row in enumerate(table):
+        combined = " ".join(
+            cell.strip().lower()
+            for cell in row
+            if cell and cell.strip()
+        )
+
+        if any(keyword in combined for keyword in keywords):
+            print(f"\nTABLE {table_index}, ROW {row_index}")
+
+            unique_cells = list(dict.fromkeys(
+                cell.strip()
+                for cell in row
+                if cell and cell.strip()
+            ))
+
+            for cell in unique_cells:
+                print(f"  {cell[:300]}")
+
+
+print("\n========== SIGNATURE TABLE STRUCTURE ==========")
+
+for table_index, table in enumerate(fba_extractor.tables):
+    if not table:
+        continue
+
+    heading = " ".join(
+        cell.strip().lower()
+        for cell in table[0]
+        if cell
+    )
+
+    if (
+        heading.startswith("signatures")
+        or "report written by" in heading
+        or "report reviewed by" in heading
+    ):
+        print(f"\nTABLE {table_index}")
+
+        for row_index, row in enumerate(table):
+            print(f"Row {row_index}: {row}")
+
+
+
+print("\n========== EMBEDDED SIGNATURE DEBUG ==========")
+
+document = docx_extractor.document
+
+for table_index, table in enumerate(document.tables):
+    for row_index, row in enumerate(table.rows):
+        for cell_index, cell in enumerate(row.cells):
+            drawings = cell._element.xpath(".//w:drawing")
+            pictures = cell._element.xpath(".//w:pict")
+
+            if drawings or pictures:
+                print(
+                    f"Table {table_index}, "
+                    f"Row {row_index}, "
+                    f"Cell {cell_index}: "
+                    f"{len(drawings)} drawing(s), "
+                    f"{len(pictures)} picture(s)"
+                )
+
+
+
+print("\n========== SIGNATURE OBJECT DETAILS ==========")
+
+document = docx_extractor.document
+
+for table_index, table in enumerate(document.tables):
+    if table_index not in [47, 48]:
+        continue
+
+    print(f"\nTABLE {table_index}")
+
+    for row_index, row in enumerate(table.rows):
+        for cell_index, cell in enumerate(row.cells):
+
+            drawings = cell._element.xpath(".//w:drawing")
+            pictures = cell._element.xpath(".//w:pict")
+            embedded_images = cell._element.xpath(".//a:blip")
+
+            # Find VML images without requiring
+            # the 'v' namespace prefix.
+            vml_images = [
+                element
+                for element in cell._element.iter()
+                if element.tag.endswith("}imagedata")
+            ]
+
+            if not drawings and not pictures:
+                continue
+
+            print(f"\nRow {row_index}, Cell {cell_index}")
+
+            print("Drawing objects:", len(drawings))
+            print("Legacy pictures:", len(pictures))
+            print("Embedded image references:", len(embedded_images))
+            print("VML image references:", len(vml_images))
+
+
+print("\n========== VML SIGNATURE REFERENCE DEBUG ==========")
+
+document = docx_extractor.document
+
+for table_index, table in enumerate(document.tables):
+    if table_index not in [47, 48]:
+        continue
+
+    print(f"\nTABLE {table_index}")
+
+    seen_cells = set()
+
+    for row_index, row in enumerate(table.rows):
+        for cell_index, cell in enumerate(row.cells):
+
+            # Avoid processing the same merged cell twice.
+            cell_id = id(cell._tc)
+
+            if cell_id in seen_cells:
+                continue
+
+            seen_cells.add(cell_id)
+
+            vml_images = [
+                element
+                for element in cell._element.iter()
+                if element.tag.endswith("}imagedata")
+            ]
+
+            for image in vml_images:
+                print(
+                    f"Row {row_index}, Cell {cell_index}"
+                )
+
+                print("Image attributes:", dict(image.attrib))
+
+                relationship_ids = [
+                    value
+                    for key, value in image.attrib.items()
+                    if key.endswith("}id")
+                ]
+
+                for relationship_id in relationship_ids:
+                    part = table._parent.part
+                    relationship = part.rels.get(relationship_id)
+
+                    if relationship:
+                        print(
+                            "Relationship type:",
+                            relationship.reltype
+                        )
+                        print(
+                            "Target:",
+                            relationship.target_ref
+                        )
+                    else:
+                        print(
+                            "Relationship not found:",
+                            relationship_id
+                        )
+
+
+
+

@@ -2750,129 +2750,138 @@ class FBAExtractor:
 
         return result
     
+    
+    
     def extract_signatures(self):
-        signatures = []
-
-        role_labels = {
-            "report written by": "report_writer",
-            "report reviewed by": "report_reviewer",
-        }
-
-        field_labels = {
-            "title, license/certificate": "title_license",
-            "date of report completed": "report_completion_date",
-        }
-
-        for table in self.tables:
-            role = None
-
-            # -------------------------
-            # IDENTIFY SIGNATURE ROLE
-            # -------------------------
-            for row in table:
-                if not row:
-                    continue
-
-                first_value = next(
-                    (cell.strip() for cell in row if cell.strip()),
-                    ""
-                )
-
-                normalized = self.normalize_label(first_value)
-
-                for label, role_name in role_labels.items():
-                    if normalized.startswith(label):
-                        role = role_name
-                        break
-
-                if role:
-                    break
-
-            if role is None:
-                continue
-
-            result = {
-                "role": role,
+        result = {
+            "report_writer": {
                 "name_credentials": "",
                 "title_license": "",
                 "report_completion_date": "",
                 "signature_date": "",
                 "signature_present": None,
-            }
+            },
+            "report_reviewer": {
+                "name_credentials": "",
+                "title_license": "",
+                "report_completion_date": "",
+                "signature_date": "",
+                "signature_present": None,
+            },
+        }
 
-            # -------------------------
-            # EXTRACT SIGNATURE FIELDS
-            # -------------------------
+        def get_value_after_label(row):
+            """
+            Extract the first populated cell after a label,
+            skipping duplicate labels caused by merged cells.
+            """
+            if not row:
+                return ""
+
+            label = self.normalize_label(row[0])
+
+            for cell in row[1:]:
+                value = cell.strip() if cell else ""
+
+                if not value:
+                    continue
+
+                if self.normalize_label(value) == label:
+                    continue
+
+                return value
+
+            return ""
+
+        for table in self.tables:
+            if not table:
+                continue
+
+            heading = " ".join(
+                cell.strip().lower()
+                for cell in table[0]
+                if cell
+            )
+
+            # ----------------------------------
+            # IDENTIFY SIGNATURE ROLE
+            # ----------------------------------
+            if "report written by" in heading:
+                role = "report_writer"
+
+            elif "report reviewed by" in heading:
+                role = "report_reviewer"
+
+            else:
+                continue
+
+            signature = result[role]
+
             for row in table:
                 if not row:
                     continue
 
-                normalized_cells = [
-                    self.normalize_label(cell)
-                    for cell in row
-                ]
+                first_cell = row[0].strip() if row[0] else ""
+                normalized = self.normalize_label(first_cell)
 
-                for index, normalized_cell in enumerate(normalized_cells):
-
-                    # Name and credentials
-                    if normalized_cell.startswith(
-                        tuple(role_labels.keys())
-                    ):
-                        result["name_credentials"] = next(
-                            (
-                                value.strip()
-                                for value in row[index + 1:]
-                                if value.strip()
-                                and self.normalize_label(value)
-                                != normalized_cell
-                            ),
-                            "",
-                        )
-
-                    # Title/license and report completion date
-                    for label, field_name in field_labels.items():
-                        if normalized_cell.startswith(label):
-                            result[field_name] = next(
-                                (
-                                    value.strip()
-                                    for value in row[index + 1:]
-                                    if value.strip()
-                                    and self.normalize_label(value)
-                                    != normalized_cell
-                                ),
-                                "",
-                            )
-
-                    # Signature date
-                    if normalized_cell == "date":
-                        result["signature_date"] = next(
-                            (
-                                value.strip()
-                                for value in row[index + 1:]
-                                if value.strip()
-                            ),
-                            "",
-                        )
-
-            # -------------------------
-            # DETECT EMBEDDED SIGNATURE
-            # -------------------------
-            if self.docx_extractor is not None:
-                role_label = (
-                    "Report written by"
-                    if role == "report_writer"
-                    else "Report reviewed by"
-                )
-
-                result["signature_present"] = (
-                    self.docx_extractor.get_signature_presence_by_role(
-                        role_label
+                # ----------------------------------
+                # NAME AND CREDENTIALS
+                # ----------------------------------
+                if (
+                    "report written by" in normalized
+                    or "report reviewed by" in normalized
+                ):
+                    signature["name_credentials"] = (
+                        get_value_after_label(row)
                     )
-                )
 
-            signatures.append(result)
+                # ----------------------------------
+                # TITLE / LICENSE / CERTIFICATE
+                # ----------------------------------
+                elif (
+                    normalized.startswith("title")
+                    and "license" in normalized
+                ):
+                    signature["title_license"] = (
+                        get_value_after_label(row)
+                    )
 
-        return signatures
+                # ----------------------------------
+                # REPORT COMPLETION DATE
+                # ----------------------------------
+                elif "date of report completed" in normalized:
+                    signature["report_completion_date"] = (
+                        get_value_after_label(row)
+                    )
+
+                # ----------------------------------
+                # SIGNATURE DATE
+                # ----------------------------------
+                elif normalized.startswith("signature"):
+                    for index, cell in enumerate(row):
+                        if not cell:
+                            continue
+
+                        normalized_cell = self.normalize_label(cell)
+
+                        if normalized_cell == "date":
+                            for next_cell in row[index + 1:]:
+                                if next_cell and next_cell.strip():
+                                    signature["signature_date"] = (
+                                        next_cell.strip()
+                                    )
+                                    break
+
+                            break
+
+                    # We cannot confirm whether a handwritten
+                    # or embedded signature exists using
+                    # table text alone.
+                    signature["signature_present"] = None
+
+        return result
+
+
 
 
     def extract_telehealth_consent(self):

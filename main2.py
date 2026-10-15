@@ -331,8 +331,8 @@ signatures = fba_extractor.extract_signatures()
 
 print("\n========== SIGNATURES ==========")
 
-for signature in signatures:
-    print("\n--------------------")
+for role, signature in signatures.items():
+    print(f"\n---------- {role.upper()} ----------")
 
     for key, value in signature.items():
         print(f"{key}: {value}")
@@ -377,6 +377,63 @@ for table_index, table in enumerate(fba_extractor.tables):
             ))
 
             print(f"Row {row_index}: {unique_cells}")
+
+print("\n========== SIGNATURE DEBUG ==========")
+
+keywords = [
+    "signature",
+    "signed",
+    "credential",
+    "date completed",
+    "date signed",
+    "bcba",
+]
+
+for table_index, table in enumerate(fba_extractor.tables):
+    if not table:
+        continue
+
+    for row_index, row in enumerate(table):
+        combined = " ".join(
+            cell.strip().lower()
+            for cell in row
+            if cell and cell.strip()
+        )
+
+        if any(keyword in combined for keyword in keywords):
+            print(f"\nTABLE {table_index}, ROW {row_index}")
+
+            unique_cells = list(dict.fromkeys(
+                cell.strip()
+                for cell in row
+                if cell and cell.strip()
+            ))
+
+            for cell in unique_cells:
+                print(f"  {cell[:300]}")
+
+
+print("\n========== SIGNATURE TABLE STRUCTURE ==========")
+
+for table_index, table in enumerate(fba_extractor.tables):
+    if not table:
+        continue
+
+    heading = " ".join(
+        cell.strip().lower()
+        for cell in table[0]
+        if cell
+    )
+
+    if (
+        heading.startswith("signatures")
+        or "report written by" in heading
+        or "report reviewed by" in heading
+    ):
+        print(f"\nTABLE {table_index}")
+
+        for row_index, row in enumerate(table):
+            print(f"Row {row_index}: {row}")
 
 
 
