@@ -327,6 +327,8 @@ print(
 for key, value in parent_guardian_involvement.items():
     print(f"{key}: {value}")
 
+
+
 signatures = fba_extractor.extract_signatures()
 
 print("\n========== SIGNATURES ==========")
@@ -348,92 +350,7 @@ for key, value in telehealth_consent.items():
     print(f"{key}: {value}")
 
 
-print("\n========== CLINICAL SUMMARY DEBUG ==========")
 
-for table_index, table in enumerate(fba_extractor.tables):
-    if not table:
-        continue
-
-    # Check the first two rows for section headings.
-    heading = " ".join(
-        cell.strip()
-        for row in table[:2]
-        for cell in row
-        if cell and cell.strip()
-    ).lower()
-
-    if (
-        "summary and recommendations" in heading
-        or "clinical summary" in heading
-    ):
-        print(f"\nTABLE {table_index}")
-
-        for row_index, row in enumerate(table):
-            # Remove repeated text caused by merged cells.
-            unique_cells = list(dict.fromkeys(
-                cell.strip()
-                for cell in row
-                if cell and cell.strip()
-            ))
-
-            print(f"Row {row_index}: {unique_cells}")
-
-print("\n========== SIGNATURE DEBUG ==========")
-
-keywords = [
-    "signature",
-    "signed",
-    "credential",
-    "date completed",
-    "date signed",
-    "bcba",
-]
-
-for table_index, table in enumerate(fba_extractor.tables):
-    if not table:
-        continue
-
-    for row_index, row in enumerate(table):
-        combined = " ".join(
-            cell.strip().lower()
-            for cell in row
-            if cell and cell.strip()
-        )
-
-        if any(keyword in combined for keyword in keywords):
-            print(f"\nTABLE {table_index}, ROW {row_index}")
-
-            unique_cells = list(dict.fromkeys(
-                cell.strip()
-                for cell in row
-                if cell and cell.strip()
-            ))
-
-            for cell in unique_cells:
-                print(f"  {cell[:300]}")
-
-
-print("\n========== SIGNATURE TABLE STRUCTURE ==========")
-
-for table_index, table in enumerate(fba_extractor.tables):
-    if not table:
-        continue
-
-    heading = " ".join(
-        cell.strip().lower()
-        for cell in table[0]
-        if cell
-    )
-
-    if (
-        heading.startswith("signatures")
-        or "report written by" in heading
-        or "report reviewed by" in heading
-    ):
-        print(f"\nTABLE {table_index}")
-
-        for row_index, row in enumerate(table):
-            print(f"Row {row_index}: {row}")
 
 
 

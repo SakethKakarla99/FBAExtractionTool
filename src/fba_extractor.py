@@ -1988,26 +1988,16 @@ class FBAExtractor:
         return intervention_areas
 
 
+    
+    
     def extract_parent_caregiver_goals(self):
         participants = []
         goals = []
 
         in_section = False
         in_goals = False
+        in_participants = False
         current_goal = None
-
-        participant_keywords = (
-            "mother",
-            "father",
-            "parent",
-            "caregiver",
-            "guardian",
-            "grandmother",
-            "grandfather",
-            "daycare staff",
-            "babysitter",
-            "respite",
-        )
 
         end_section_headings = {
             "generalization and maintenance plan",
@@ -2038,6 +2028,7 @@ class FBAExtractor:
                 if normalized == "parent/caregiver goals":
                     in_section = True
                     in_goals = False
+                    in_participants = False
                     current_goal = None
                     continue
 
@@ -2052,54 +2043,30 @@ class FBAExtractor:
                     or normalized in end_section_headings
                 ):
                     in_section = False
+                    in_goals = False
+                    in_participants = False
                     current_goal = None
                     continue
 
                 # -------------------------
-                # SKIP INSTRUCTIONS / HEADINGS
+                # PARTICIPANT TABLE HEADER
+                # -------------------------
+                if normalized.startswith(
+                    "participants in parent training"
+                ):
+                    in_participants = True
+                    in_goals = False
+                    continue
+
+                # -------------------------
+                # SKIP INSTRUCTIONS
                 # -------------------------
                 if (
-                    normalized.startswith("participants in parent training")
-                    or "parent/caregiver goals should specify" in normalized
+                    "parent/caregiver goals should specify" in normalized
                     or normalized.startswith("previously mastered skills")
                     or normalized.startswith("identify measurable")
                 ):
                     continue
-
-                # -------------------------
-                # PARTICIPANTS
-                # -------------------------
-                if not in_goals:
-
-                    # Avoid treating goal descriptions or headings
-                    # as participants.
-                    is_goal_description = (
-                        normalized.startswith("by ")
-                        or (
-                            normalized.startswith("parent/caregiver goal")
-                            and "long-term" in normalized
-                        )
-                    )
-
-                    if (
-                        not is_goal_description
-                        and not normalized.startswith("parent/caregiver goal")
-                    ):
-                        is_participant = any(
-                            keyword in normalized
-                            for keyword in participant_keywords
-                        )
-
-                        if is_participant:
-                            participants.append({
-                                "participant": first_value,
-                                "previously_mastered_skills": (
-                                    row[1].strip()
-                                    if len(row) > 1 and row[1]
-                                    else ""
-                                ),
-                            })
-                            continue
 
                 # -------------------------
                 # GOAL START (LABELED)
@@ -2108,6 +2075,7 @@ class FBAExtractor:
                     normalized.startswith("parent/caregiver goal")
                     and "long-term" in normalized
                 ):
+                    in_participants = False
                     in_goals = True
 
                     current_goal = {
@@ -2124,6 +2092,7 @@ class FBAExtractor:
                 # GOAL START (UNLABELED)
                 # -------------------------
                 if normalized.startswith("by "):
+                    in_participants = False
                     in_goals = True
 
                     current_goal = {
@@ -2134,6 +2103,30 @@ class FBAExtractor:
                     }
 
                     goals.append(current_goal)
+                    continue
+
+                # -------------------------
+                # END PARTICIPANT TABLE
+                # -------------------------
+                if (
+                    in_participants
+                    and normalized.startswith("parent/caregiver goal")
+                ):
+                    in_participants = False
+                    continue
+
+                # -------------------------
+                # PARTICIPANTS
+                # -------------------------
+                if in_participants and not in_goals:
+                    participants.append({
+                        "participant": first_value,
+                        "previously_mastered_skills": (
+                            row[1].strip()
+                            if len(row) > 1 and row[1]
+                            else ""
+                        ),
+                    })
                     continue
 
                 if current_goal is None:
@@ -2184,6 +2177,8 @@ class FBAExtractor:
             "participants": participants,
             "goals": goals,
         }
+
+
 
     def extract_generalization_maintenance_plan(self):
         field_labels = {
@@ -2752,7 +2747,10 @@ class FBAExtractor:
     
     
     
+    
     def extract_signatures(self):
+        from docx.oxml.ns import qn
+
         result = {
             "report_writer": {
                 "name_credentials": "",
@@ -2771,10 +2769,6 @@ class FBAExtractor:
         }
 
         def get_value_after_label(row):
-            """
-            Extract the first populated cell after a label,
-            skipping duplicate labels caused by merged cells.
-            """
             if not row:
                 return ""
 
@@ -2793,7 +2787,48 @@ class FBAExtractor:
 
             return ""
 
-        for table in self.tables:
+        def has_embedded_image(cell, document_part):
+            """
+            Check whether a Word table cell contains
+            an embedded image relationship.
+            Supports DrawingML and legacy VML images.
+            """
+            element = cell._element
+
+            relationship_ids = set()
+
+            # Modern Word images
+            for blip in element.xpath(".//a:blip"):
+                relationship_id = blip.get(qn("r:embed"))
+
+                if relationship_id:
+                    relationship_ids.add(relationship_id)
+
+            # Legacy VML images
+            for child in element.iter():
+                if child.tag.endswith("}imagedata"):
+                    relationship_id = child.get(qn("r:id"))
+
+                    if relationship_id:
+                        relationship_ids.add(relationship_id)
+
+            for relationship_id in relationship_ids:
+                relationship = document_part.rels.get(
+                    relationship_id
+                )
+
+                if relationship is None:
+                    continue
+
+                if relationship.reltype.endswith("/image"):
+                    return True
+
+            return False
+
+        document = self.docx_extractor.document
+
+        # Use original DOCX tables for image detection.
+        for table_index, table in enumerate(self.tables):
             if not table:
                 continue
 
@@ -2803,9 +2838,6 @@ class FBAExtractor:
                 if cell
             )
 
-            # ----------------------------------
-            # IDENTIFY SIGNATURE ROLE
-            # ----------------------------------
             if "report written by" in heading:
                 role = "report_writer"
 
@@ -2817,6 +2849,9 @@ class FBAExtractor:
 
             signature = result[role]
 
+            # ----------------------------------
+            # EXTRACT SIGNATURE METADATA
+            # ----------------------------------
             for row in table:
                 if not row:
                     continue
@@ -2824,9 +2859,6 @@ class FBAExtractor:
                 first_cell = row[0].strip() if row[0] else ""
                 normalized = self.normalize_label(first_cell)
 
-                # ----------------------------------
-                # NAME AND CREDENTIALS
-                # ----------------------------------
                 if (
                     "report written by" in normalized
                     or "report reviewed by" in normalized
@@ -2835,9 +2867,6 @@ class FBAExtractor:
                         get_value_after_label(row)
                     )
 
-                # ----------------------------------
-                # TITLE / LICENSE / CERTIFICATE
-                # ----------------------------------
                 elif (
                     normalized.startswith("title")
                     and "license" in normalized
@@ -2846,25 +2875,17 @@ class FBAExtractor:
                         get_value_after_label(row)
                     )
 
-                # ----------------------------------
-                # REPORT COMPLETION DATE
-                # ----------------------------------
                 elif "date of report completed" in normalized:
                     signature["report_completion_date"] = (
                         get_value_after_label(row)
                     )
 
-                # ----------------------------------
-                # SIGNATURE DATE
-                # ----------------------------------
                 elif normalized.startswith("signature"):
                     for index, cell in enumerate(row):
                         if not cell:
                             continue
 
-                        normalized_cell = self.normalize_label(cell)
-
-                        if normalized_cell == "date":
+                        if self.normalize_label(cell) == "date":
                             for next_cell in row[index + 1:]:
                                 if next_cell and next_cell.strip():
                                     signature["signature_date"] = (
@@ -2874,12 +2895,41 @@ class FBAExtractor:
 
                             break
 
-                    # We cannot confirm whether a handwritten
-                    # or embedded signature exists using
-                    # table text alone.
-                    signature["signature_present"] = None
+            # ----------------------------------
+            # DETECT EMBEDDED SIGNATURE IMAGE
+            # ----------------------------------
+            if table_index >= len(document.tables):
+                continue
+
+            original_table = document.tables[table_index]
+
+            for row_index, row in enumerate(table):
+                if not row:
+                    continue
+
+                first_cell = row[0].strip() if row[0] else ""
+
+                if not self.normalize_label(
+                    first_cell
+                ).startswith("signature"):
+                    continue
+
+                original_row = original_table.rows[row_index]
+
+                image_found = False
+
+                for cell in original_row.cells:
+                    if has_embedded_image(
+                        cell,
+                        document.part,
+                    ):
+                        image_found = True
+                        break
+
+                signature["signature_present"] = image_found
 
         return result
+
 
 
 
