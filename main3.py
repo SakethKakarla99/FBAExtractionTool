@@ -380,3 +380,101 @@ for table_index, table in enumerate(fba_extractor.tables):
 
 
 
+print("\n========== TRANSITION PLAN DEBUG ==========")
+
+for table_index, table in enumerate(fba_extractor.tables):
+    if not table:
+        continue
+
+    for row_index, row in enumerate(table):
+        row_text = " ".join(
+            cell.strip().lower()
+            for cell in row
+            if cell
+        )
+
+        if "transition plan" in row_text:
+            print(f"\nTABLE {table_index}")
+
+            for index, current_row in enumerate(table):
+                print(f"Row {index}: {current_row}")
+
+            break
+
+
+
+print("\n========== RECORDS REVIEWED DEBUG ==========")
+
+for table_index, table in enumerate(fba_extractor.tables):
+    if not table:
+        continue
+
+    for row_index, row in enumerate(table):
+        row_text = " ".join(
+            cell.strip().lower()
+            for cell in row
+            if cell
+        )
+
+        if (
+            "records reviewed" in row_text
+            or "record type" in row_text
+            or "author of record" in row_text
+        ):
+            print(f"\nTABLE {table_index}")
+
+            for index, current_row in enumerate(table):
+                print(f"Row {index}: {current_row}")
+
+            break
+
+print("\n========== RECORDS LOOKUP TEST ==========")
+
+table = fba_extractor.find_table([
+    "Record Type",
+    "Author of Record",
+    "Date of Record",
+    "Records Reviewed",
+])
+
+print("Table found:", table is not None)
+
+if table is not None:
+    print("Rows returned:", len(table))
+    print("Extracted records:", fba_extractor.extract_records_reviewed())
+
+
+print("\n========== SCHOOL / IEP TABLE 17 DEBUG ==========")
+
+doc = fba_extractor.docx_extractor.document
+table = doc.tables[17]
+
+for row_index, row in enumerate(table.rows):
+    print(f"\nROW {row_index}")
+
+    for cell_index, cell in enumerate(row.cells):
+        print(f"  CELL {cell_index}: {repr(cell.text[:250])}")
+
+        checkboxes = cell._tc.xpath(
+            './/*[local-name()="checkbox"]'
+        )
+
+        content_controls = cell._tc.xpath(
+            './/*[local-name()="sdt"]'
+        )
+
+        ink_parts = cell._tc.xpath(
+            './/*[local-name()="contentPart"]'
+        )
+
+        print(f"    Legacy checkboxes: {len(checkboxes)}")
+        print(f"    Content controls: {len(content_controls)}")
+        print(f"    Ink drawings: {len(ink_parts)}")
+
+        for checkbox_index, checkbox in enumerate(checkboxes):
+            print(
+                f"    Checkbox {checkbox_index}: "
+                f"{checkbox.xml[:500]}"
+            )
+
+

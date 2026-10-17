@@ -364,6 +364,7 @@ class FBAExtractor:
             if (
                 non_empty_values
                 and len(set(non_empty_values)) == 1
+                and "records reviewed" in self.normalize_label(non_empty_values[0])
             ):
                 continue
 
@@ -809,6 +810,10 @@ class FBAExtractor:
                 ):
                     value = None
 
+            if field_name == "no_iep_explanation" and value:
+                prefix = "If No, please explain:"
+                if value.lower().startswith(prefix.lower()):
+                    value = value[len(prefix):].strip()
             school_iep[field_name] = value
 
         
@@ -2336,7 +2341,7 @@ class FBAExtractor:
                 "individualized_timeline",
             "what is the expectation for generalization":
                 "generalization_expectations",
-            "please provide a description of how the level of services will be faded out":
+            "please provide a description of how the level of services will":
                 "service_fading_plan",
         }
 

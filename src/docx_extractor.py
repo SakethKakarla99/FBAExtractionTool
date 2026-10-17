@@ -76,7 +76,10 @@ class DOCXExtractor:
 
         return None
 
+    
     def get_yes_no_checkbox_by_label(self, possible_labels):
+        import re
+
         normalized_labels = [
             " ".join(label.strip().lower().rstrip(":").split())
             for label in possible_labels
@@ -84,8 +87,7 @@ class DOCXExtractor:
 
         for table in self.document.tables:
             for row in table.rows:
-
-                for cell_index, cell in enumerate(row.cells):
+                for cell in row.cells:
                     normalized_cell = " ".join(
                         cell.text.strip().lower().rstrip(":").split()
                     )
@@ -99,8 +101,33 @@ class DOCXExtractor:
                     if not label_found:
                         continue
 
-                    # Search the other cells in this row for Yes/No checkboxes
                     for value_cell in row.cells:
+                        # First: detect Unicode checkbox symbols
+                        text = value_cell.text
+
+                        yes_match = re.search(
+                            r"([☒☑☐])\s*Yes\b",
+                            text,
+                            re.IGNORECASE
+                        )
+
+                        no_match = re.search(
+                            r"([☒☑☐])\s*No\b",
+                            text,
+                            re.IGNORECASE
+                        )
+
+                        if yes_match and no_match:
+                            yes_checked = yes_match.group(1) in ("☒", "☑")
+                            no_checked = no_match.group(1) in ("☒", "☑")
+
+                            if yes_checked and not no_checked:
+                                return "Yes"
+
+                            if no_checked and not yes_checked:
+                                return "No"
+
+                        # Second: preserve legacy Word checkbox support
                         checkbox_elements = value_cell._tc.xpath(
                             './/*[local-name()="checkbox"]'
                         )
@@ -119,7 +146,6 @@ class DOCXExtractor:
                                 continue
 
                             checked_element = checked_elements[0]
-
                             value = None
 
                             for attribute_name, attribute_value in checked_element.attrib.items():
@@ -130,7 +156,9 @@ class DOCXExtractor:
                                     value = attribute_value
                                     break
 
-                            checkbox_states.append(value == "1")
+                            checkbox_states.append(
+                                value in ("1", "true", "on")
+                            )
 
                         if len(checkbox_states) < 2:
                             continue
@@ -144,9 +172,8 @@ class DOCXExtractor:
                         if no_checked and not yes_checked:
                             return "No"
 
-                        return None
-
         return None
+
 
     def get_signature_presence_by_role(self, role_label):
         for table in self.document.tables:
