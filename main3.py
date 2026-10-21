@@ -478,3 +478,61 @@ for row_index, row in enumerate(table.rows):
             )
 
 
+print("\n========== TELEHEALTH CONSENT DEBUG ==========")
+
+doc = fba_extractor.docx_extractor.document
+
+for table_index, table in enumerate(doc.tables):
+    table_text = " ".join(
+        cell.text.lower()
+        for row in table.rows
+        for cell in row.cells
+    )
+
+    if "telehealth consent" not in table_text:
+        continue
+
+    print(f"\nTABLE {table_index}")
+
+    for row_index, row in enumerate(table.rows):
+        print(f"\nROW {row_index}")
+
+        for cell_index, cell in enumerate(row.cells):
+            print(f"  CELL {cell_index}: {repr(cell.text[:500])}")
+
+            checkboxes = cell._tc.xpath(
+                './/*[local-name()="checkbox"]'
+            )
+
+            content_controls = cell._tc.xpath(
+                './/*[local-name()="sdt"]'
+            )
+
+            ink_parts = cell._tc.xpath(
+                './/*[local-name()="contentPart"]'
+            )
+
+            print(f"    Legacy checkboxes: {len(checkboxes)}")
+            print(f"    Content controls: {len(content_controls)}")
+            print(f"    Ink drawings: {len(ink_parts)}")
+
+
+print("\n========== TARGET BEHAVIOR GOALS DEBUG ==========")
+
+for table_index, table in enumerate(fba_extractor.tables):
+    for row_index, row in enumerate(table):
+        row_text = " ".join(
+            cell.strip().lower()
+            for cell in row
+            if cell
+        )
+
+        if "target behavior goal 1" in row_text:
+            print(f"\nTABLE {table_index}")
+
+            for index, current_row in enumerate(table):
+                print(f"Row {index}: {current_row}")
+
+            break
+
+

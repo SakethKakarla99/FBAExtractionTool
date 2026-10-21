@@ -1736,40 +1736,124 @@ class FBAExtractor:
 
         return {}
 
+    
+    
     def extract_target_replacement_goals(self):
+        import re
+
         target_goals = []
         replacement_goals = []
 
-        # Keep current_goal outside the table loop so a goal
-        # can continue into the next Word table.
+        # Preserve the current goal across Word tables.
         current_goal = None
+        current_goal_type = None
+
+        def get_first_value(row):
+            return next(
+                (
+                    cell.strip()
+                    for cell in row
+                    if cell and cell.strip()
+                ),
+                "",
+            )
+
+        def get_next_value(table, row_index):
+            """Find the next nonempty row within the current table."""
+            for next_index in range(row_index + 1, len(table)):
+                value = get_first_value(table[next_index])
+
+                if value:
+                    return value
+
+            return ""
+
+        def is_field_label(value):
+            """Identify labels that should not be treated as values."""
+            normalized = self.normalize_label(value)
+
+            labels = (
+                "target behavior goal",
+                "replacement behavior goal",
+                "topography of target behavior",
+                "antecedent strategies for target behavior",
+                "consequent strategies for target behavior",
+                "date of introduction",
+                "baseline data and date",
+                "location/setting of target behavior",
+                "location/setting of replacement behavior",
+            )
+
+            if any(normalized.startswith(label) for label in labels):
+                return True
+
+            # Handles numbered labels such as:
+            # "1.Date of Introduction: August 2025"
+            return bool(
+                re.match(
+                    r"^\d+\s*[\.\)]\s*date of introduction\b",
+                    normalized,
+                    re.IGNORECASE,
+                )
+            )
+
+        def get_field_value(first_value, table, row_index):
+            """
+            Extract a field value from the same cell after a colon,
+            or from the next nonempty row.
+            """
+            if ":" in first_value:
+                inline_value = first_value.split(":", 1)[1].strip()
+
+                if inline_value:
+                    return inline_value
+
+            next_value = get_next_value(table, row_index)
+
+            if next_value and not is_field_label(next_value):
+                return next_value
+
+            return ""
+
+        def get_goal_description(first_value, table, row_index):
+            """
+            Extract the description embedded in the goal cell,
+            or from the following row.
+            """
+            if ":" in first_value:
+                inline_description = first_value.split(":", 1)[1].strip()
+
+                if inline_description:
+                    return inline_description
+
+            next_value = get_next_value(table, row_index)
+
+            if next_value and not is_field_label(next_value):
+                return next_value
+
+            return ""
 
         for table in self.tables:
-
             for row_index, row in enumerate(table):
                 if not row:
                     continue
 
-                first_value = next(
-                    (
-                        cell.strip()
-                        for cell in row
-                        if cell.strip()
-                    ),
-                    "",
-                )
+                first_value = get_first_value(row)
 
                 if not first_value:
                     continue
 
                 normalized_value = self.normalize_label(first_value)
 
-                # -------------------------
+                # -----------------------------------
                 # TARGET BEHAVIOR GOAL
-                # -------------------------
+                # -----------------------------------
                 if normalized_value.startswith("target behavior goal"):
                     current_goal = {
                         "goal": first_value,
+                        "goal_description": get_goal_description(
+                            first_value, table, row_index
+                        ),
                         "topography": "",
                         "location_setting": "",
                         "antecedent_strategies": "",
@@ -1778,69 +1862,96 @@ class FBAExtractor:
                         "baseline_data_date": "",
                     }
 
+                    current_goal_type = "target"
                     target_goals.append(current_goal)
                     continue
 
-                # -------------------------
+                # -----------------------------------
                 # REPLACEMENT BEHAVIOR GOAL
-                # -------------------------
+                # -----------------------------------
                 if normalized_value.startswith("replacement behavior goal"):
                     current_goal = {
                         "goal": first_value,
+                        "goal_description": get_goal_description(
+                            first_value, table, row_index
+                        ),
                         "date_of_introduction": "",
                         "location_setting": "",
                         "baseline_data_date": "",
                     }
 
+                    current_goal_type = "replacement"
                     replacement_goals.append(current_goal)
                     continue
 
                 if current_goal is None:
                     continue
 
-                # -------------------------
-                # TARGET GOAL FIELDS
-                # -------------------------
-                if normalized_value.startswith(
-                    "topography of target behavior"
+                # -----------------------------------
+                # TOPOGRAPHY
+                # -----------------------------------
+                if (
+                    current_goal_type == "target"
+                    and normalized_value.startswith(
+                        "topography of target behavior"
+                    )
                 ):
-                    current_goal["topography"] = first_value
+                    current_goal["topography"] = get_field_value(
+                        first_value, table, row_index
+                    )
 
-                elif normalized_value.startswith(
-                    "antecedent strategies for target behavior"
-                ):
-                    current_goal["antecedent_strategies"] = first_value
-
-                elif normalized_value.startswith(
-                    "consequent strategies for target behavior"
-                ):
-                    current_goal["consequent_strategies"] = first_value
-
-                # -------------------------
-                # DATE OF INTRODUCTION
-                # -------------------------
-                elif normalized_value.startswith("date of introduction"):
-                    current_goal["date_of_introduction"] = first_value
-
-                # Handles things like:
-                # "1.Date of Introduction: August 2025"
+                # -----------------------------------
+                # ANTECEDENT STRATEGIES
+                # -----------------------------------
                 elif (
-                    "date of introduction" in normalized_value
-                    and normalized_value[0].isdigit()
+                    current_goal_type == "target"
+                    and normalized_value.startswith(
+                        "antecedent strategies for target behavior"
+                    )
                 ):
-                    current_goal["date_of_introduction"] = first_value
+                    current_goal["antecedent_strategies"] = get_field_value(
+                        first_value, table, row_index
+                    )
 
-                # -------------------------
-                # BASELINE
-                # -------------------------
-                elif normalized_value.startswith(
-                    "baseline data and date"
+                # -----------------------------------
+                # CONSEQUENT STRATEGIES
+                # -----------------------------------
+                elif (
+                    current_goal_type == "target"
+                    and normalized_value.startswith(
+                        "consequent strategies for target behavior"
+                    )
                 ):
-                    current_goal["baseline_data_date"] = first_value
+                    current_goal["consequent_strategies"] = get_field_value(
+                        first_value, table, row_index
+                    )
 
-                # -------------------------
+                # -----------------------------------
+                # DATE OF INTRODUCTION
+                # -----------------------------------
+                elif (
+                    normalized_value.startswith("date of introduction")
+                    or re.match(
+                        r"^\d+\s*[\.\)]\s*date of introduction\b",
+                        normalized_value,
+                        re.IGNORECASE,
+                    )
+                ):
+                    current_goal["date_of_introduction"] = get_field_value(
+                        first_value, table, row_index
+                    )
+
+                # -----------------------------------
+                # BASELINE DATA AND DATE
+                # -----------------------------------
+                elif normalized_value.startswith("baseline data and date"):
+                    current_goal["baseline_data_date"] = get_field_value(
+                        first_value, table, row_index
+                    )
+
+                # -----------------------------------
                 # LOCATION / SETTING
-                # -------------------------
+                # -----------------------------------
                 elif (
                     normalized_value.startswith(
                         "location/setting of target behavior"
@@ -1849,27 +1960,16 @@ class FBAExtractor:
                         "location/setting of replacement behavior"
                     )
                 ):
-                    location = ""
-
-                    # Location choices are in the following row
-                    if row_index + 1 < len(table):
-                        next_row = table[row_index + 1]
-
-                        location = next(
-                            (
-                                cell.strip()
-                                for cell in next_row
-                                if cell.strip()
-                            ),
-                            "",
-                        )
-
-                    current_goal["location_setting"] = location
+                    current_goal["location_setting"] = get_field_value(
+                        first_value, table, row_index
+                    )
 
         return {
             "target_behavior_goals": target_goals,
             "replacement_behavior_goals": replacement_goals,
         }
+
+
 
     
     def extract_skill_acquisition_goals(self):
@@ -2937,9 +3037,9 @@ class FBAExtractor:
 
 
 
-
-
     def extract_telehealth_consent(self):
+        import re
+
         result = {
             "telehealth_consent": None,
             "consent_date": "",
@@ -2954,86 +3054,133 @@ class FBAExtractor:
         if table is None:
             return result
 
-        # Extract consent date dynamically
+        # Extract consent date
         for row in table:
             for cell in row:
-                value = cell.strip()
+                text = cell.strip()
 
-                if self.normalize_label(value).startswith(
-                    "if yes, please confirm the date consent obtained"
-                ):
-                    if ":" in value:
-                        result["consent_date"] = value.split(
-                            ":", 1
-                        )[1].strip()
+                if "date" in text.lower() and "consent" in text.lower():
+                    match = re.search(
+                        r"\b\d{1,2}/\d{1,2}/\d{4}\b",
+                        text
+                    )
 
-        # Extract checkbox states from Word XML
-        if self.docx_extractor is not None:
+                    if match:
+                        result["consent_date"] = match.group(0)
 
-            for word_table in self.docx_extractor.document.tables:
+        if self.docx_extractor is None:
+            return result
 
-                heading_found = any(
-                    "telehealth consent confirmation" in cell.text.lower()
-                    for row in word_table.rows
-                    for cell in row.cells
-                )
+        # Find the Telehealth Consent table in the Word document
+        for word_table in self.docx_extractor.document.tables:
 
-                if not heading_found:
-                    continue
+            table_text = " ".join(
+                cell.text.lower()
+                for row in word_table.rows
+                for cell in row.cells
+            )
 
-                for row in word_table.rows:
-                    for cell in row.cells:
+            if "telehealth consent confirmation" not in table_text:
+                continue
 
-                        if "consent was obtained" not in cell.text.lower():
-                            continue
+            for row in word_table.rows:
+                for cell in row.cells:
+                    text = cell.text
 
-                        checkboxes = cell._tc.xpath(
-                            './/*[local-name()="checkbox"]'
+                    if "consent was obtained" not in text.lower():
+                        continue
+
+                    # ---------------------------------
+                    # METHOD 1: Unicode checkbox symbols
+                    # ---------------------------------
+                    selections = {}
+
+                    for option in ("Yes", "No", "N/A"):
+                        match = re.search(
+                            rf"([☒☑☐])\s*{re.escape(option)}\b",
+                            text,
+                            re.IGNORECASE
                         )
 
+                        if match:
+                            selections[option] = (
+                                match.group(1) in ("☒", "☑")
+                            )
+
+                    checked_options = [
+                        option
+                        for option, checked in selections.items()
+                        if checked
+                    ]
+
+                    if len(checked_options) == 1:
+                        selected = checked_options[0]
+
+                        result["telehealth_consent"] = selected
+                        result["no_telehealth_services"] = (
+                            selected == "N/A"
+                        )
+
+                        return result
+
+                    # ---------------------------------
+                    # METHOD 2: Word XML checkboxes
+                    # ---------------------------------
+                    checkboxes = cell._tc.xpath(
+                        './/*[local-name()="checkbox"]'
+                    )
+
+                    if len(checkboxes) >= 3:
                         checkbox_states = []
 
-                        for checkbox in checkboxes:
+                        
+                        for checkbox in checkboxes[:3]:
                             checked_elements = checkbox.xpath(
                                 './*[local-name()="checked"]'
                             )
 
-                            if not checked_elements:
-                                checkbox_states.append(False)
-                                continue
+                            checked_value = None
 
-                            checked_element = checked_elements[0]
+                            if checked_elements:
+                                checked_element = checked_elements[0]
 
-                            checked_value = next(
-                                (
-                                    attribute_value
-                                    for attribute_name, attribute_value
-                                    in checked_element.attrib.items()
-                                    if attribute_name.endswith("}val")
-                                    or attribute_name == "val"
-                                ),
-                                None
-                            )
+                                checked_value = next(
+                                    (
+                                        attribute_value
+                                        for attribute_name, attribute_value
+                                        in checked_element.attrib.items()
+                                        if attribute_name.endswith("}val")
+                                        or attribute_name == "val"
+                                    ),
+                                    None
+                                )
 
                             checkbox_states.append(
-                                checked_value == "1"
+                                checked_value in ("1", "true", "on")
                             )
 
-                        if len(checkbox_states) == 3:
-                            yes_checked = checkbox_states[0]
-                            no_checked = checkbox_states[1]
-                            na_checked = checkbox_states[2]
+                        
 
-                            if sum(checkbox_states) == 1:
-                                result["telehealth_consent"] = (
-                                    "Yes" if yes_checked
-                                    else "No" if no_checked
-                                    else "N/A"
-                                )
-                                result["no_telehealth_services"] = na_checked
+                        if sum(checkbox_states) == 1:
+                            options = ["Yes", "No", "N/A"]
 
-                        return result
+                            selected_index = checkbox_states.index(True)
+                            selected = options[selected_index]
+
+                            result["telehealth_consent"] = selected
+                            result["no_telehealth_services"] = (
+                                selected == "N/A"
+                            )
+
+                            return result
 
         return result
+    
+
+
+    
+
+
+    
 
                 

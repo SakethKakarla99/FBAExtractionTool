@@ -367,3 +367,127 @@ for role, signature in signatures.items():
 
 
 
+from lxml import etree
+
+print("\n========== TELEHEALTH CHECKBOX DEBUG ==========")
+
+doc = fba_extractor.docx_extractor.document
+
+for table_index, table in enumerate(doc.tables):
+    table_text = " ".join(
+        cell.text.lower()
+        for row in table.rows
+        for cell in row.cells
+    )
+
+    if "telehealth consent confirmation" not in table_text:
+        continue
+
+    print(f"\nTABLE {table_index}")
+
+    for row_index, row in enumerate(table.rows):
+        print(f"\nROW {row_index}")
+
+        for cell_index, cell in enumerate(row.cells):
+            print(f"\nCELL {cell_index}")
+            print(f"TEXT: {repr(cell.text[:500])}")
+
+            # Legacy Word checkboxes
+            checkboxes = cell._tc.xpath(
+                './/*[local-name()="checkbox"]'
+            )
+
+            # Word content controls
+            content_controls = cell._tc.xpath(
+                './/*[local-name()="sdt"]'
+            )
+
+            # Ink drawings
+            ink_parts = cell._tc.xpath(
+                './/*[local-name()="contentPart"]'
+            )
+
+            print(f"Legacy checkboxes: {len(checkboxes)}")
+            print(f"Content controls: {len(content_controls)}")
+            print(f"Ink drawings: {len(ink_parts)}")
+
+            # Inspect each legacy checkbox
+            for checkbox_index, checkbox in enumerate(checkboxes):
+                print(f"\nCHECKBOX {checkbox_index}")
+
+                checkbox_xml = etree.tostring(
+                    checkbox,
+                    encoding="unicode"
+                )
+
+                print("XML:", checkbox_xml[:1000])
+
+                checked_elements = checkbox.xpath(
+                    './*[local-name()="checked"]'
+                )
+
+                if checked_elements:
+                    checked_element = checked_elements[0]
+
+                    checked_value = next(
+                        (
+                            attribute_value
+                            for attribute_name, attribute_value
+                            in checked_element.attrib.items()
+                            if attribute_name.endswith("}val")
+                            or attribute_name == "val"
+                        ),
+                        None
+                    )
+
+                    print("Checked value:", checked_value)
+                else:
+                    print("Checked value: Not specified")
+
+            # Inspect content controls
+            for control_index, control in enumerate(content_controls):
+                print(f"\nCONTENT CONTROL {control_index}")
+
+                control_xml = etree.tostring(
+                    control,
+                    encoding="unicode"
+                )
+
+                print("XML:", control_xml[:1000])
+
+
+print("\n========== REPLACEMENT GOAL 3 DEBUG ==========")
+
+for table_index, table in enumerate(fba_extractor.tables):
+    for row_index, row in enumerate(table):
+        row_text = " ".join(
+            cell.strip().lower()
+            for cell in row
+            if cell
+        )
+
+        if "replacement behavior goal 3" in row_text:
+            print(f"\nTABLE {table_index}")
+
+            for index, current_row in enumerate(table):
+                print(f"Row {index}: {current_row}")
+
+            break
+
+
+print("\n========== REPLACEMENT GOAL 3 CONTINUATION DEBUG ==========")
+
+for table_index in range(29, min(32, len(fba_extractor.tables))):
+    print(f"\n========== TABLE {table_index} ==========")
+
+    for row_index, row in enumerate(fba_extractor.tables[table_index]):
+        if table_index == 29 and row_index < 33:
+            continue
+
+        print(f"Row {row_index}: {row}")
+
+
+
+
+
+
