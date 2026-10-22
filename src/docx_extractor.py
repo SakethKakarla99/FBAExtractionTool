@@ -210,3 +210,139 @@ class DOCXExtractor:
                 return False
 
         return False
+
+
+
+    
+    def get_location_checkboxes(
+        self, possible_labels, table_index=None, row_index=None
+    ):
+        import re
+
+        options = [
+            "Telehealth",
+            "Home",
+            "School",
+            "Clinic",
+            "Community",
+        ]
+
+        normalized_labels = [
+            " ".join(label.strip().lower().rstrip(":").split())
+            for label in possible_labels
+        ]
+
+        for current_table_index, table in enumerate(self.document.tables):
+
+            # If a specific table was requested, skip other tables.
+            if (
+                table_index is not None
+                and current_table_index != table_index
+            ):
+                continue
+
+            for current_row_index, row in enumerate(table.rows):
+
+                # If a specific row was requested, skip other rows.
+                if (
+                    row_index is not None
+                    and current_row_index != row_index
+                ):
+                    continue
+
+                for cell in row.cells:
+                    normalized_cell = " ".join(
+                        cell.text.strip().lower().rstrip(":").split()
+                    )
+
+                    label_found = any(
+                        normalized_cell.startswith(label)
+                        for label in normalized_labels
+                    )
+
+                    if not label_found:
+                        continue
+
+                    # Location options may be in the label row
+                    # or immediately following it.
+                    for candidate_index in (
+                        current_row_index,
+                        current_row_index + 1,
+                    ):
+                        if candidate_index >= len(table.rows):
+                            continue
+
+                        for value_cell in table.rows[candidate_index].cells:
+                            text = value_cell.text
+
+                            # ----------------------------------
+                            # METHOD 1: Unicode checkbox symbols
+                            # ----------------------------------
+                            selections = []
+
+                            for option in options:
+                                match = re.search(
+                                    rf"([☒☑☐])\s*{re.escape(option)}\b",
+                                    text,
+                                    re.IGNORECASE,
+                                )
+
+                                if not match:
+                                    selections = []
+                                    break
+
+                                selections.append(
+                                    match.group(1) in ("☒", "☑")
+                                )
+
+                            if len(selections) == len(options):
+                                return "  ".join(
+                                    f"{'☒' if checked else '☐'} {option}"
+                                    for option, checked in zip(
+                                        options, selections
+                                    )
+                                )
+
+                            # ----------------------------------
+                            # METHOD 2: Word XML checkboxes
+                            # ----------------------------------
+                            checkboxes = value_cell._tc.xpath(
+                                './/*[local-name()="checkbox"]'
+                            )
+
+                            if len(checkboxes) != len(options):
+                                continue
+
+                            states = []
+
+                            for checkbox in checkboxes:
+                                checked_elements = checkbox.xpath(
+                                    './*[local-name()="checked"]'
+                                )
+
+                                checked_value = None
+
+                                if checked_elements:
+                                    checked_element = checked_elements[0]
+
+                                    for name, value in checked_element.attrib.items():
+                                        if (
+                                            name.endswith("}val")
+                                            or name == "val"
+                                        ):
+                                            checked_value = value
+                                            break
+
+                                states.append(
+                                    checked_value in ("1", "true", "on")
+                                )
+
+                            return "  ".join(
+                                f"{'☒' if checked else '☐'} {option}"
+                                for option, checked in zip(
+                                    options, states
+                                )
+                            )
+
+        return None
+

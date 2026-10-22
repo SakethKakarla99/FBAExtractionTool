@@ -350,6 +350,14 @@ for key, value in telehealth_consent.items():
     print(f"{key}: {value}")
 
 
+print("\n========== LOCATION CHECKBOX HELPER TEST ==========")
+
+print(
+    fba_extractor.docx_extractor.get_location_checkboxes(
+        ["Location/setting of target behavior"]
+    )
+)
+
 
 
 

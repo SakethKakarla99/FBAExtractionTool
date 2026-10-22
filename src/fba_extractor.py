@@ -1738,6 +1738,7 @@ class FBAExtractor:
 
     
     
+    
     def extract_target_replacement_goals(self):
         import re
 
@@ -1784,11 +1785,12 @@ class FBAExtractor:
                 "location/setting of replacement behavior",
             )
 
-            if any(normalized.startswith(label) for label in labels):
+            if any(
+                normalized.startswith(label)
+                for label in labels
+            ):
                 return True
 
-            # Handles numbered labels such as:
-            # "1.Date of Introduction: August 2025"
             return bool(
                 re.match(
                     r"^\d+\s*[\.\)]\s*date of introduction\b",
@@ -1799,7 +1801,7 @@ class FBAExtractor:
 
         def get_field_value(first_value, table, row_index):
             """
-            Extract a field value from the same cell after a colon,
+            Extract a value from the same cell after a colon,
             or from the next nonempty row.
             """
             if ":" in first_value:
@@ -1817,23 +1819,32 @@ class FBAExtractor:
 
         def get_goal_description(first_value, table, row_index):
             """
-            Extract the description embedded in the goal cell,
-            or from the following row.
+            Extract a goal description from the same cell
+            or the following row.
             """
+            inline_description = ""
+
             if ":" in first_value:
                 inline_description = first_value.split(":", 1)[1].strip()
 
-                if inline_description:
-                    return inline_description
-
             next_value = get_next_value(table, row_index)
 
+            # Short inline values such as "Tantrum" are
+            # behavior names, not full goal descriptions.
             if next_value and not is_field_label(next_value):
-                return next_value
+                if (
+                    not inline_description
+                    or len(inline_description) < 50
+                ):
+                    return next_value
 
-            return ""
+            return inline_description
 
-        for table in self.tables:
+        # ---------------------------------------
+        # PROCESS TABLES
+        # ---------------------------------------
+        for table_index, table in enumerate(self.tables):
+
             for row_index, row in enumerate(table):
                 if not row:
                     continue
@@ -1848,9 +1859,11 @@ class FBAExtractor:
                 # -----------------------------------
                 # TARGET BEHAVIOR GOAL
                 # -----------------------------------
-                if normalized_value.startswith("target behavior goal"):
+                if normalized_value.startswith(
+                    "target behavior goal"
+                ):
                     current_goal = {
-                        "goal": first_value,
+                        "goal": first_value.split(":",1)[0].strip(),
                         "goal_description": get_goal_description(
                             first_value, table, row_index
                         ),
@@ -1869,9 +1882,11 @@ class FBAExtractor:
                 # -----------------------------------
                 # REPLACEMENT BEHAVIOR GOAL
                 # -----------------------------------
-                if normalized_value.startswith("replacement behavior goal"):
+                if normalized_value.startswith(
+                    "replacement behavior goal"
+                ):
                     current_goal = {
-                        "goal": first_value,
+                        "goal": first_value.split(":",1)[0].strip(),
                         "goal_description": get_goal_description(
                             first_value, table, row_index
                         ),
@@ -1909,8 +1924,10 @@ class FBAExtractor:
                         "antecedent strategies for target behavior"
                     )
                 ):
-                    current_goal["antecedent_strategies"] = get_field_value(
-                        first_value, table, row_index
+                    current_goal["antecedent_strategies"] = (
+                        get_field_value(
+                            first_value, table, row_index
+                        )
                     )
 
                 # -----------------------------------
@@ -1922,31 +1939,41 @@ class FBAExtractor:
                         "consequent strategies for target behavior"
                     )
                 ):
-                    current_goal["consequent_strategies"] = get_field_value(
-                        first_value, table, row_index
+                    current_goal["consequent_strategies"] = (
+                        get_field_value(
+                            first_value, table, row_index
+                        )
                     )
 
                 # -----------------------------------
                 # DATE OF INTRODUCTION
                 # -----------------------------------
                 elif (
-                    normalized_value.startswith("date of introduction")
+                    normalized_value.startswith(
+                        "date of introduction"
+                    )
                     or re.match(
                         r"^\d+\s*[\.\)]\s*date of introduction\b",
                         normalized_value,
                         re.IGNORECASE,
                     )
                 ):
-                    current_goal["date_of_introduction"] = get_field_value(
-                        first_value, table, row_index
+                    current_goal["date_of_introduction"] = (
+                        get_field_value(
+                            first_value, table, row_index
+                        )
                     )
 
                 # -----------------------------------
                 # BASELINE DATA AND DATE
                 # -----------------------------------
-                elif normalized_value.startswith("baseline data and date"):
-                    current_goal["baseline_data_date"] = get_field_value(
-                        first_value, table, row_index
+                elif normalized_value.startswith(
+                    "baseline data and date"
+                ):
+                    current_goal["baseline_data_date"] = (
+                        get_field_value(
+                            first_value, table, row_index
+                        )
                     )
 
                 # -----------------------------------
@@ -1960,14 +1987,36 @@ class FBAExtractor:
                         "location/setting of replacement behavior"
                     )
                 ):
-                    current_goal["location_setting"] = get_field_value(
-                        first_value, table, row_index
-                    )
+                    # First try extracting the checkbox states
+                    # from the original Word document.
+                    location = None
+
+                    if self.docx_extractor is not None:
+                        location = (
+                            self.docx_extractor.get_location_checkboxes(
+                                [
+                                    "Location/setting of target behavior",
+                                    "Location/setting of replacement behavior",
+                                ],
+                                table_index=table_index,
+                                row_index=row_index,
+                            )
+                        )
+
+                    # Fall back to the parsed text if checkbox
+                    # extraction is unavailable.
+                    if location is None:
+                        location = get_field_value(
+                            first_value, table, row_index
+                        )
+
+                    current_goal["location_setting"] = location
 
         return {
             "target_behavior_goals": target_goals,
             "replacement_behavior_goals": replacement_goals,
         }
+
 
 
 

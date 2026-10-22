@@ -487,7 +487,89 @@ for table_index in range(29, min(32, len(fba_extractor.tables))):
         print(f"Row {row_index}: {row}")
 
 
+print("\n========== LOCATION CHECKBOX DEBUG ==========")
+
+for table_index, table in enumerate(
+    fba_extractor.docx_extractor.document.tables
+):
+    for row_index, row in enumerate(table.rows):
+        for cell in row.cells:
+            if "location/setting of target behavior" not in cell.text.lower():
+                continue
+
+            print(f"\nTABLE {table_index}, ROW {row_index}")
+
+            for offset in range(3):
+                current_index = row_index + offset
+
+                if current_index >= len(table.rows):
+                    break
+
+                for current_cell in table.rows[current_index].cells:
+                    checkboxes = current_cell._tc.xpath(
+                        './/*[local-name()="checkbox"]'
+                    )
+
+                    states = []
+
+                    for checkbox in checkboxes:
+                        checked_elements = checkbox.xpath(
+                            './*[local-name()="checked"]'
+                        )
+
+                        if checked_elements:
+                            states.append(
+                                dict(checked_elements[0].attrib)
+                            )
+                        else:
+                            states.append({})
+
+                    print(
+                        f"Row {current_index}:",
+                        repr(current_cell.text),
+                        "Checkbox states:",
+                        states
+                    )
+
+            break
 
 
 
+print("\n========== LOCATION CHECKBOX HELPER TEST ==========")
+
+print(
+    fba_extractor.docx_extractor.get_location_checkboxes(
+        ["Location/setting of target behavior"]
+    )
+)
+
+
+print("\n========== TABLE ALIGNMENT DEBUG ==========")
+
+print("Parsed tables:", len(fba_extractor.tables))
+print("Word tables:", len(fba_extractor.docx_extractor.document.tables))
+
+print(
+    "Parsed table 29, row 6:",
+    fba_extractor.tables[29][6]
+)
+
+print(
+    "Word table 29, row 6:",
+    [
+        cell.text
+        for cell in fba_extractor.docx_extractor.document.tables[29].rows[6].cells
+    ]
+)
+
+
+print("\n========== SPECIFIC LOCATION TEST ==========")
+
+print(
+    fba_extractor.docx_extractor.get_location_checkboxes(
+        ["Location/setting of target behavior"],
+        table_index=29,
+        row_index=6,
+    )
+)
 
