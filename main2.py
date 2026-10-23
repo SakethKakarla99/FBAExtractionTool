@@ -5,6 +5,8 @@ FILE_PATH = "documents/fba2.docx"
 
 docx_extractor = DOCXExtractor(FILE_PATH)
 
+docx_extractor.debug_missing_spaces()
+
 tables = docx_extractor.get_tables()
 
 fba_extractor = FBAExtractor(tables, docx_extractor)
@@ -188,6 +190,12 @@ else:
 behavior_intervention_plans = (
     fba_extractor.extract_behavior_intervention_plans()
 )
+
+for plan in behavior_intervention_plans:
+    value = plan.get("replacement_behavior_training", "")
+    print("DEBUG FINAL BIP:", repr(value))
+    print("HAS CORRECT SPACE:", "access when" in value)
+    print("HAS MISSING SPACE:", "accesswhen" in value)
 
 print("\n========== BEHAVIOR INTERVENTION PLANS ==========")
 

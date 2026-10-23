@@ -346,3 +346,40 @@ class DOCXExtractor:
 
         return None
 
+
+    def debug_missing_spaces(self):
+
+        print("DEBUG MISSING SPACES FUNCTION IS RUNNING")
+
+        search_terms = [
+            "theform",
+            "the form",
+            "mayfall",
+            "may fall",
+            "taken away",
+            "takenaway",
+        ]
+
+        for table_index, table in enumerate(self.document.tables):
+            for row_index, row in enumerate(table.rows):
+                for cell_index, cell in enumerate(row.cells):
+
+                    text = cell.text
+
+                    if not any(term in text.lower() for term in search_terms):
+                        continue
+
+                    print(f"\nTable: {table_index}")
+                    print(f"Row: {row_index}")
+                    print(f"Cell: {cell_index}")
+
+                    print("\nCELL TEXT:")
+                    print(repr(text))
+
+                    print("\nPARAGRAPH RUNS:")
+
+                    for paragraph in cell.paragraphs:
+                        for run_index, run in enumerate(paragraph.runs):
+                            print(
+                                f"Run {run_index}: {repr(run.text)}"
+                            )

@@ -1597,11 +1597,19 @@ class FBAExtractor:
                 # ------------------------------------
                 # TARGET BEHAVIOR
                 # ------------------------------------
+
                 if normalized.startswith("target behavior"):
                     behavior_name = ""
 
-                    if len(row) > 1 and row[1]:
-                        behavior_name = row[1].strip()
+                    if len(row) > 1:
+                        for cell in row[1:]:
+                            if cell and cell.strip():
+                                behavior_name = cell.strip()
+                                break
+                        
+
+                    if not behavior_name and ":" in first_cell:
+                        behavior_name = first_cell.split(":", 1)[1].strip()
 
                     if not behavior_name:
                         behavior_name = "Unspecified Target Behavior"
@@ -1638,6 +1646,7 @@ class FBAExtractor:
                     field_name,
                     alias,
                 )
+                
 
                 if value:
                     current_plan[field_name] = value
