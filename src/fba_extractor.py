@@ -2041,8 +2041,9 @@ class FBAExtractor:
         def extract_after_colon(value):
             return value.split(":", 1)[1].strip() if ":" in value else value.strip()
 
-        for table in self.tables:
-            for row in table:
+        # Track table and row indexes for checkbox detection
+        for table_index, table in enumerate(self.tables):
+            for row_index, row in enumerate(table):
                 if not row:
                     continue
 
@@ -2076,6 +2077,7 @@ class FBAExtractor:
                         "intervention_area": extract_after_colon(first_value),
                         "goals": []
                     }
+
                     intervention_areas.append(current_area)
                     current_goal = None
                     expecting_description = False
@@ -2105,6 +2107,7 @@ class FBAExtractor:
 
                     # Handle a description in the same cell
                     remaining_text = first_value[goal_match.end():].strip()
+
                     if remaining_text:
                         current_goal["goal_description"] = remaining_text
                         expecting_description = False
@@ -2123,12 +2126,27 @@ class FBAExtractor:
                     continue
 
                 # Location / setting
+                
                 if normalized_value.startswith(
                     "location/setting of skill acquisition goal"
                 ):
-                    current_goal["location_setting"] = extract_after_colon(
-                        first_value
+                    location_labels = [
+                        "Location/Setting of Skill Acquisition Goal",
+                    ]
+
+                    selected_locations = self.docx_extractor.get_location_checkboxes(
+                        possible_labels=location_labels,
+                        table_index=table_index,
+                        row_index=row_index
                     )
+
+                    if selected_locations is not None:
+                        current_goal["location_setting"] = selected_locations
+                    else:
+                        current_goal["location_setting"] = extract_after_colon(
+                            first_value
+                        )
+
                     expecting_description = False
                     continue
 
@@ -2150,7 +2168,7 @@ class FBAExtractor:
 
         return intervention_areas
 
-
+    
     
     
     def extract_parent_caregiver_goals(self):
@@ -2168,8 +2186,8 @@ class FBAExtractor:
             "behavior intervention plan",
         }
 
-        for table in self.tables:
-            for row in table:
+        for table_index, table in enumerate(self.tables):
+            for row_index, row in enumerate(table):
                 if not row:
                     continue
 
@@ -2329,17 +2347,32 @@ class FBAExtractor:
                         )
                     )
                 ):
-                    current_goal["location_setting"] = (
-                        first_value.split(":", 1)[1].strip()
-                        if ":" in first_value
-                        else first_value
+                    selected_locations = (
+                        self.docx_extractor.get_location_checkboxes(
+                            possible_labels=["Parent/Caregiver Goal"],
+                            table_index=table_index,
+                            row_index=row_index,
+                        )
                     )
+
+                    if selected_locations is not None:
+                        current_goal["location_setting"] = (
+                            selected_locations
+                        )
+                    else:
+                        current_goal["location_setting"] = (
+                            first_value.split(":", 1)[1].strip()
+                            if ":" in first_value
+                            else first_value
+                        )
+
                     continue
 
         return {
             "participants": participants,
             "goals": goals,
         }
+
 
 
 
