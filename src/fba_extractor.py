@@ -2507,7 +2507,11 @@ class FBAExtractor:
         return plan
 
     
+    
+    
     def extract_transition_plan(self):
+        import re
+
         table = self.find_table([
             "TRANSITION PLAN",
             "Transition Plan",
@@ -2582,11 +2586,6 @@ class FBAExtractor:
         # -----------------------------------
         # DETECT TREATMENT REPORT SELECTION
         # -----------------------------------
-        # The original narrative extraction uses self.tables.
-        # For ink drawings, we also inspect the underlying DOCX XML.
-
-        from docx import Document
-
         if self.docx_extractor is None:
             return result
 
@@ -2606,49 +2605,119 @@ class FBAExtractor:
                 for cell in row.cells:
                     for paragraph in cell.paragraphs:
                         option_text = paragraph.text.strip()
-                        normalized_option = self.normalize_label(option_text)
+
+                        if not option_text:
+                            continue
+
+                        # -----------------------------------
+                        # TEXT-BASED SELECTION MARKERS
+                        # -----------------------------------
+                        marker_match = re.match(
+                            r"^\s*(X|☒|☑|☐)\s+",
+                            option_text,
+                            re.IGNORECASE
+                        )
+
+                        marker = (
+                            marker_match.group(1)
+                            if marker_match
+                            else None
+                        )
+
+                        clean_text = (
+                            option_text[marker_match.end():].strip()
+                            if marker_match
+                            else option_text
+                        )
+
+                        normalized_option = self.normalize_label(
+                            clean_text
+                        )
 
                         for prefix, option_name in treatment_options.items():
                             if not normalized_option.startswith(prefix):
                                 continue
 
-                            # Standard Word checkbox content controls
+                            # -----------------------------------
+                            # TEXT MARKER DETECTION
+                            # -----------------------------------
+                            if marker is not None:
+                                if (
+                                    marker.upper() == "X"
+                                    or marker in ("☒", "☑")
+                                ):
+                                    result["treatment_report_status"] = (
+                                        option_name
+                                    )
+                                    result["treatment_report_selection_method"] = (
+                                        "text_marker"
+                                    )
+                                    return result
+
+                                if marker == "☐":
+                                    continue
+
+                            # -----------------------------------
+                            # WORD CHECKBOX CONTENT CONTROLS
+                            # -----------------------------------
                             checkbox_elements = paragraph._p.xpath(
                                 ".//*[local-name()='checkbox']"
                             )
 
                             checked = False
+
                             for checkbox in checkbox_elements:
                                 states = checkbox.xpath(
                                     ".//*[local-name()='checked']"
                                 )
+
                                 for state in states:
-                                    value = state.get(
-                                        "{http://schemas.microsoft.com/office/word/2010/wordml}val"
+                                    value = next(
+                                        (
+                                            attr_value
+                                            for attr_name, attr_value
+                                            in state.attrib.items()
+                                            if attr_name.endswith("}val")
+                                            or attr_name == "val"
+                                        ),
+                                        None
                                     )
+
                                     if value in ("1", "true", "on"):
                                         checked = True
 
                             if checked:
-                                result["treatment_report_status"] = option_name
+                                result["treatment_report_status"] = (
+                                    option_name
+                                )
                                 result["treatment_report_selection_method"] = (
                                     "word_checkbox"
                                 )
                                 return result
 
-                            # Ink drawings can indicate handwritten selections.
+                            # -----------------------------------
+                            # INK DRAWING DETECTION
+                            # Supports:
+                            # 1. Modern Word ink (contentPart)
+                            # 2. Legacy VML ink (v:shape id="Ink ...")
+                            # -----------------------------------
                             ink_parts = paragraph._p.xpath(
                                 ".//*[local-name()='contentPart']"
+                                " | .//*[local-name()='shape' "
+                                "and starts-with(@id, 'Ink ')]"
                             )
 
                             if ink_parts:
-                                result["treatment_report_status"] = option_name
+                                result["treatment_report_status"] = (
+                                    option_name
+                                )
                                 result["treatment_report_selection_method"] = (
                                     "ink_drawing_unverified"
                                 )
                                 return result
 
         return result
+
 
 
     def extract_crisis_plan(self):
