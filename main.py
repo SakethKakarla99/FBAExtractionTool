@@ -563,13 +563,5 @@ print(
 )
 
 
-print("\n========== SPECIFIC LOCATION TEST ==========")
 
-print(
-    fba_extractor.docx_extractor.get_location_checkboxes(
-        ["Location/setting of target behavior"],
-        table_index=29,
-        row_index=6,
-    )
-)
 

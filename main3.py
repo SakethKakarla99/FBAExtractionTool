@@ -517,23 +517,4 @@ for table_index, table in enumerate(doc.tables):
             print(f"    Ink drawings: {len(ink_parts)}")
 
 
-print("\n========== TARGET BEHAVIOR GOALS DEBUG ==========")
-
-for table_index, table in enumerate(fba_extractor.tables):
-    for row_index, row in enumerate(table):
-        row_text = " ".join(
-            cell.strip().lower()
-            for cell in row
-            if cell
-        )
-
-        if "target behavior goal 1" in row_text:
-            print(f"\nTABLE {table_index}")
-
-            for index, current_row in enumerate(table):
-                print(f"Row {index}: {current_row}")
-
-            break
-
-
 
